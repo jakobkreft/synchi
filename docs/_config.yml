@@ -1,0 +1,8 @@
+title: Synchi
+description: Efficient two-way sync between local and remote roots.
+markdown: kramdown
+repository: jakobkreft/synchi
+
+github:
+  is_project_page: true
+  repository_url: https://github.com/jakobkreft/synchi

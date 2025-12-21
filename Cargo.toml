@@ -1,0 +1,28 @@
+[package]
+name = "synchi"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+anyhow = "1.0"
+clap = { version = "4.4", features = ["derive", "env"] }
+serde = { version = "1.0", features = ["derive"] }
+toml = "0.8"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+dirs = "5.0"
+walkdir = "2.4"
+globset = "0.4"
+rusqlite = { version = "0.29", features = ["bundled"] }
+indicatif = "0.17"
+tempfile = "3.8"
+filetime = "0.2"
+url = "2.5"
+hostname = "0.3"
+ctrlc = "3.4"
+
+# TUI
+ratatui = "0.29.0"
+crossterm = "0.28.1"
+sha2 = "0.10.9"
+hex = "0.4.3"
