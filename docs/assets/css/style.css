@@ -2,7 +2,7 @@
   --bg: #ffffff;
   --text: #111111;
   --muted: #666666;
-  --accent: #7c1b1b;
+  --accent: #a32a2a;
   --border: #dddddd;
   font-size: 16px;
 }
@@ -11,10 +11,18 @@
   box-sizing: border-box;
 }
 
+@font-face {
+  font-family: "Iosevka";
+  src: url("/assets/fonts/iosevka-extendedmedium.woff2") format("woff2");
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+}
+
 body {
   margin: 0;
   padding: 0;
-  font-family: "JetBrains Mono", "Fira Code", "SFMono-Regular", Consolas, Monaco, "Courier New", monospace;
+  font-family:  "Iosevka", monospace;
   color: var(--text);
   background: var(--bg);
   line-height: 1.65;

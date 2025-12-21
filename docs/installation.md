@@ -12,7 +12,7 @@ If you prefer, you can also build it yourself from source.
 
 Go to the GitHub releases page and download the binary for your platform:
 
-- https://github.com/jakobkreft/synchi/releases
+- [https://github.com/jakobkreft/synchi/releases/](https://github.com/jakobkreft/synchi/releases/)
 
 Extract the archive and make the binary executable, then place it somewhere on your `PATH`, for example:
 
