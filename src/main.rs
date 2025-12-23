@@ -37,6 +37,9 @@ struct Cli {
     #[arg(long)]
     root_b: Option<String>,
 
+    #[arg(long, value_name = "NAME")]
+    state_db_name: Option<String>,
+
     /// Enable verbose output (debug logging)
     #[arg(short, long)]
     verbose: bool,
@@ -162,6 +165,9 @@ fn main() -> Result<()> {
     if let Some(force_arg) = cli.force {
         config.force = force_arg.as_config_value();
     }
+    if let Some(name) = cli.state_db_name {
+        config.state_db_name = Some(name);
+    }
 
     print_effective_config(&config);
 
@@ -177,6 +183,7 @@ fn main() -> Result<()> {
                 .root_b
                 .as_ref()
                 .context("Root B not defined in config or CLI")?;
+            let db_filename = config.state_db_filename();
 
             let source_path = std::path::Path::new(source);
             let dest_path = std::path::Path::new(dest);
@@ -191,7 +198,7 @@ fn main() -> Result<()> {
             let synchi_dir = source_path.join(".synchi");
             std::fs::create_dir_all(&synchi_dir).context("Failed to create .synchi directory")?;
 
-            let state_db_path = synchi_dir.join("state.db");
+            let state_db_path = synchi_dir.join(&db_filename);
             let _db = state::StateDb::open(&state_db_path)
                 .context("Failed to initialize state database")?;
 
@@ -211,6 +218,7 @@ fn main() -> Result<()> {
                 .root_b
                 .as_ref()
                 .context("Root B not defined in config or CLI")?;
+            let db_filename = config.state_db_filename();
 
             let root_a = roots::LocalRoot::new(source)?;
             let root_b: Box<dyn roots::Root> = if dest.contains(':') {
@@ -221,10 +229,13 @@ fn main() -> Result<()> {
             ensure_root_ready(&root_a)?;
             ensure_root_ready(root_b.as_ref())?;
             let lock_info = lock_info_string();
-            let _lock_a = state::Lock::acquire(&root_a, "state.lock", &lock_info)?;
-            let _lock_b = state::Lock::acquire(root_b.as_ref(), "state.lock", &lock_info)?;
+            let lock_name = format!("{}.lock", db_filename);
+            let _lock_a = state::Lock::acquire(&root_a, &lock_name, &lock_info)?;
+            let _lock_b = state::Lock::acquire(root_b.as_ref(), &lock_name, &lock_info)?;
 
-            let state_db_path = std::path::Path::new(source).join(".synchi/state.db");
+            let state_db_path = std::path::Path::new(source)
+                .join(".synchi")
+                .join(&db_filename);
             if !state_db_path.exists() {
                 println!("Not initialized. Run 'synchi init' first.");
                 return Ok(());
@@ -317,6 +328,7 @@ fn main() -> Result<()> {
                 .root_b
                 .as_ref()
                 .context("Root B not defined in config or CLI")?;
+            let db_filename = config.state_db_filename();
 
             info!("Syncing from {} to {}", source, dest);
 
@@ -329,10 +341,13 @@ fn main() -> Result<()> {
             ensure_root_ready(&root_a)?;
             ensure_root_ready(root_b.as_ref())?;
             let lock_info = lock_info_string();
-            let _lock_a = state::Lock::acquire(&root_a, "state.lock", &lock_info)?;
-            let _lock_b = state::Lock::acquire(root_b.as_ref(), "state.lock", &lock_info)?;
+            let lock_name = format!("{}.lock", db_filename);
+            let _lock_a = state::Lock::acquire(&root_a, &lock_name, &lock_info)?;
+            let _lock_b = state::Lock::acquire(root_b.as_ref(), &lock_name, &lock_info)?;
 
-            let state_db_path = std::path::Path::new(source).join(".synchi/state.db");
+            let state_db_path = std::path::Path::new(source)
+                .join(".synchi")
+                .join(&db_filename);
             std::fs::create_dir_all(state_db_path.parent().unwrap())?;
             let db = state::StateDb::open(&state_db_path)?;
             let state_snapshot = db.list_entries()?;
@@ -559,6 +574,7 @@ fn print_effective_config(config: &config::Config) {
     println!("Hash mode: {:?}", config.hash_mode);
     println!("Preserve owner: {}", config.preserve_owner);
     println!("Preserve permissions: {}", config.preserve_permissions);
+    println!("State DB file: {}", config.state_db_filename());
     println!();
 }
 

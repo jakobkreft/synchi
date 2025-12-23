@@ -20,6 +20,8 @@ pub struct Config {
     pub preserve_owner: bool,
     #[serde(default = "Config::default_preserve")]
     pub preserve_permissions: bool,
+    #[serde(default)]
+    pub state_db_name: Option<String>,
 }
 
 impl Default for Config {
@@ -34,6 +36,7 @@ impl Default for Config {
             hash_mode: HashMode::Balanced,
             preserve_owner: Self::default_preserve(),
             preserve_permissions: Self::default_preserve(),
+            state_db_name: None,
         }
     }
 }
@@ -92,5 +95,36 @@ impl Config {
 
     fn default_preserve() -> bool {
         true
+    }
+
+    pub fn state_db_filename(&self) -> String {
+        let name = self
+            .state_db_name
+            .as_deref()
+            .map(|s| s.trim())
+            .filter(|s| !s.is_empty())
+            .unwrap_or("state");
+        let sanitized = sanitize_state_db_name(name);
+        if sanitized.ends_with(".db") {
+            sanitized
+        } else {
+            format!("{sanitized}.db")
+        }
+    }
+}
+
+fn sanitize_state_db_name(input: &str) -> String {
+    let mut sanitized = String::with_capacity(input.len());
+    for ch in input.chars() {
+        if ch.is_ascii_alphanumeric() || matches!(ch, '.' | '-' | '_') {
+            sanitized.push(ch);
+        } else {
+            sanitized.push('_');
+        }
+    }
+    if sanitized.is_empty() {
+        "state.db".to_string()
+    } else {
+        sanitized
     }
 }

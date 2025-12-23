@@ -101,8 +101,9 @@ Only genuinely new or changed files are transferred, making syncing efficient an
 | `hash_mode`    | `"balanced"` (default) or `"always"`. Balanced hashes a file only when its mtime/size changed and uses the hash to confirm the change; always hashes every file. |
 | `preserve_owner` | Default `true`. When `false`, tar extraction runs with `--no-same-owner`, so files keep the destination user’s ownership (useful for SMB/NAS/FUSE targets that reject `chown`). |
 | `preserve_permissions` | Default `true`. When `false`, Synchi skips `chmod`/`touch` steps and omits `--preserve-permissions`, letting the destination filesystem assign modes/mtimes. |
+| `state_db_name` | Optional label inside `.synchi/` for the state database. Synchi appends `.db`, so `project` becomes `.synchi/project.db` (default `state.db`). |
 
-All options can also be overridden via CLI flags (e.g., `--root-a`, `--root-b`, `--hash-mode`, `--force root_a`, `--dry-run`, `-y`, `--copy-a-to-b no`).
+All options can also be overridden via CLI flags (e.g., `--root-a`, `--root-b`, `--hash-mode`, `--force root_a`, `--state-db-name archive`, `--dry-run`, `-y`, `--copy-a-to-b no`).
 
 Create your own config file `config.toml`
 
@@ -151,4 +152,3 @@ This will perform a sync according to the settings in your config file.
 - Use `synchi -v ...` to surface detailed tracing, including scan locations and remote commands.
 - When in doubt, run `synchi status` first; it takes the same code path as `sync` without mutating either root.
 - For reliable SSH behavior, prefer the `ssh://` form whenever you need non-default ports, user-less logins, or future SSH options.
-

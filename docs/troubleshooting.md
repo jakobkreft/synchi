@@ -14,7 +14,7 @@ This usually means a file disappeared between the scan and the hashing step, or 
 Things to try:
 
 - Re-run when the directory tree is stable (no builds or cleanup jobs running).
-- If you changed `include` significantly, delete `.synchi/state.db` and re-initialize so the state matches your new scope.
+- If you changed `include` significantly, delete `.synchi/<state_db_name>.db` (default `state.db`) and re-initialize so the state matches your new scope.
 - Run with `-v` to see which path failed and consider adding it to `ignore`.
 
 ## `Failed to acquire lock (file exists)`
@@ -85,7 +85,7 @@ If you tighten `include`, files that were previously tracked may show up as dele
 You can either:
 
 * Let Synchi apply the deletions, or
-* Delete `.synchi/state.db` and run `synchi init` to reset the state
+* Delete `.synchi/<state_db_name>.db` (default `state.db`) and run `synchi init` to reset the state
 
 ## Diagnostic tips
 

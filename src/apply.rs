@@ -6,6 +6,7 @@ use crate::state::{CopyMetrics, PendingCopy, PendingDelete, StateDb};
 use crate::transport::{CopyBehavior, CopyStream, Transport};
 use anyhow::{bail, Context, Result};
 use indicatif::ProgressBar;
+use std::collections::VecDeque;
 use std::path::Path;
 use std::sync::{
     atomic::{AtomicBool, AtomicU64, Ordering},
@@ -446,7 +447,8 @@ impl ProgressMonitor {
         let stop = Arc::new(AtomicBool::new(false));
         let stop_flag = stop.clone();
         let handle = thread::spawn(move || {
-            let start_time = Instant::now();
+            let mut samples: VecDeque<(Instant, u64)> = VecDeque::new();
+            const WINDOW: Duration = Duration::from_secs(10);
             loop {
                 if stop_flag.load(Ordering::Relaxed) {
                     break;
@@ -456,9 +458,22 @@ impl ProgressMonitor {
                 let position = (bytes + extra).min(total_work);
                 pb.set_position(position);
                 if total_bytes > 0 {
-                    let elapsed = start_time.elapsed();
-                    let rate = if elapsed.as_secs_f64() > 0.0 {
-                        bytes as f64 / elapsed.as_secs_f64()
+                    let now = Instant::now();
+                    samples.push_back((now, bytes));
+                    while let Some(&(t, _)) = samples.front() {
+                        if now.duration_since(t) > WINDOW {
+                            samples.pop_front();
+                        } else {
+                            break;
+                        }
+                    }
+                    let rate = if let Some(&(t0, b0)) = samples.front() {
+                        let dt = now.duration_since(t0).as_secs_f64();
+                        if dt > 0.0 {
+                            (bytes.saturating_sub(b0)) as f64 / dt
+                        } else {
+                            0.0
+                        }
                     } else {
                         0.0
                     };

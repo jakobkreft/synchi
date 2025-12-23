@@ -44,6 +44,7 @@ Most users only need to adjust `root_a`, `root_b`, and possibly `include` / `ign
 | `skip_hardlinks`       | Skip files that have multiple hard links on both roots.                                                  | `false`      |
 | `preserve_owner`       | Preserve file ownership during sync. Disable for filesystems that reject `chown`.                        | `true`       |
 | `preserve_permissions` | Preserve file permissions and mtimes. Disable on non-POSIX filesystems.                                  | `true`       |
+| `state_db_name`        | Optional label inside `.synchi/` for the state database. Synchi stores it as `<label>.db`. Use unique names per config if needed. | `state.db`   |
 
 ## Include and Ignore Patterns
 
@@ -99,10 +100,12 @@ This avoids errors during extraction and lets the destination filesystem apply i
 Most options can be overridden via CLI flags, including:
 
 * `--root-a`, `--root-b`
+* `--state-db-name`
 * `--hash-mode`
 * `--force`
 * `--dry-run`
 * `-y / --yes`
+* Category approvals: `--copy-a-to-b yes|no`, `--copy-b-to-a yes|no`, `--delete-on-a yes|no`, `--delete-on-b yes|no`
 
 Both `synchi status` and `synchi sync` use the same logic.
 Running `status` first shows exactly what `sync` would do.
