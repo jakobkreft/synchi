@@ -95,6 +95,33 @@ fn test_diff_delete_vs_create_conflict() {
 }
 
 #[test]
+fn test_diff_both_created_identical_no_conflict() {
+    let mut entry = make_entry("same.txt", 100);
+    entry.hash = Some(vec![1, 2, 3]);
+    let scan_a = vec![entry.clone()];
+    let scan_b = vec![entry.clone()];
+    let filter = empty_filter();
+    let diffs = DiffEngine::diff(scan_a, vec![], scan_b, vec![], &filter);
+    assert_eq!(diffs.len(), 1);
+    assert!(matches!(diffs[0].action, SyncAction::NoOp));
+}
+
+#[test]
+fn test_diff_both_modified_identical_no_conflict() {
+    let mut prev = make_entry("same.txt", 50);
+    prev.hash = Some(vec![0, 0, 0]);
+    let mut updated = make_entry("same.txt", 200);
+    updated.hash = Some(vec![5, 5, 5]);
+    let scan_a = vec![updated.clone()];
+    let scan_b = vec![updated.clone()];
+    let state = vec![prev];
+    let filter = empty_filter();
+    let diffs = DiffEngine::diff(scan_a, state.clone(), scan_b, state, &filter);
+    assert_eq!(diffs.len(), 1);
+    assert!(matches!(diffs[0].action, SyncAction::NoOp));
+}
+
+#[test]
 fn test_balanced_detects_hash_change() {
     let mut state_entry = make_entry("file.txt", 100);
     state_entry.hash = Some(vec![1, 2, 3]);

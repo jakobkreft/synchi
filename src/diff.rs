@@ -282,9 +282,21 @@ impl DiffEngine {
             (Unchanged, Modified) => SyncAction::CopyBtoA,
             (Unchanged, Deleted) => SyncAction::DeleteA,
 
-            (Created, Created) => SyncAction::Conflict(ConflictReason::BothModified),
+            (Created, Created) => {
+                if Self::entries_match(a, b) {
+                    SyncAction::NoOp
+                } else {
+                    SyncAction::Conflict(ConflictReason::BothModified)
+                }
+            }
             (Created, Modified) => SyncAction::Conflict(ConflictReason::TypeMismatch),
-            (Modified, Modified) => SyncAction::Conflict(ConflictReason::BothModified),
+            (Modified, Modified) => {
+                if Self::entries_match(a, b) {
+                    SyncAction::NoOp
+                } else {
+                    SyncAction::Conflict(ConflictReason::BothModified)
+                }
+            }
             (Deleted, Deleted) => SyncAction::NoOp,
 
             (Created, Deleted) => SyncAction::Conflict(ConflictReason::DeleteVsModify),
@@ -297,6 +309,13 @@ impl DiffEngine {
                 SyncAction::Conflict(ConflictReason::TypeMismatch)
             }
             (Modified, Created) => SyncAction::Conflict(ConflictReason::BothModified),
+        }
+    }
+
+    fn entries_match(a: &SideChange, b: &SideChange) -> bool {
+        match (&a.entry_now, &b.entry_now) {
+            (Some(ea), Some(eb)) => ea.kind == eb.kind && !Self::is_modified(ea, eb),
+            _ => false,
         }
     }
 }
