@@ -63,7 +63,7 @@ synchi sync --root-a ./folderA --root-b ssh://user@host:8022/remote/path
 
 Root A always holds `.synchi` and the SQLite database, so it must be writable.
 
-Each `synchi sync` run prints the same status summary as `synchi status` before touching either root. Synchi then prompts for every category that still has pending work—`Copy A → B`, `Copy B → A`, `Delete on A`, and `Delete on B`. Answer `y`/`n` per category, pass `-y/--yes` to auto-approve all unanswered categories, or use the explicit flags below to pre-decide:
+Each `synchi sync` run prints the same status summary as `synchi status` before touching either root. Synchi then prompts for every category that still has pending work—`Copy A → B`, `Copy B → A`, `Delete on A`, and `Delete on B`. Answer `y`/`n` per category, type `dry` to list the pending items before deciding, pass `-y/--yes` to auto-approve all unanswered categories, or use the explicit flags below to pre-decide:
 
 ```
 --copy-a-to-b yes|no

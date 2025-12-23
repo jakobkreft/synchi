@@ -82,6 +82,8 @@ Setting `force` enables one-way mirroring:
 
 When force mode is active, conflicts are suppressed because one side always wins.
 
+Without force, `synchi sync` prints the diff summary and then prompts separately for each category that still has work pending (`Copy A → B`, `Copy B → A`, `Delete on A`, `Delete on B`). Reply with `y`/`n`, type `dry` to list the pending paths before deciding, pre-approve via CLI (`--copy-a-to-b yes|no`, etc.), or pass `-y/--yes` to auto-approve all unanswered categories in one go.
+
 ## Ownership and Permissions
 
 Some filesystems do not support POSIX ownership or permissions (for example: SMB shares, NAS devices, Android storage).

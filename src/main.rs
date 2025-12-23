@@ -444,7 +444,7 @@ fn main() -> Result<()> {
             let allow_copy_a_to_b = resolve_category_setting(
                 copy_a_to_b_choice,
                 "Copy A → B",
-                !plan.copy_a_to_b.is_empty(),
+                PendingView::copy(&plan.copy_a_to_b),
                 *dry_run,
                 *auto_yes,
             )?;
@@ -456,7 +456,7 @@ fn main() -> Result<()> {
             let allow_copy_b_to_a = resolve_category_setting(
                 copy_b_to_a_choice,
                 "Copy B → A",
-                !plan.copy_b_to_a.is_empty(),
+                PendingView::copy(&plan.copy_b_to_a),
                 *dry_run,
                 *auto_yes,
             )?;
@@ -468,7 +468,7 @@ fn main() -> Result<()> {
             let allow_delete_on_a = resolve_category_setting(
                 delete_on_a_choice,
                 "Delete on A",
-                !plan.delete_a.is_empty(),
+                PendingView::delete(&plan.delete_a),
                 *dry_run,
                 *auto_yes,
             )?;
@@ -480,7 +480,7 @@ fn main() -> Result<()> {
             let allow_delete_on_b = resolve_category_setting(
                 delete_on_b_choice,
                 "Delete on B",
-                !plan.delete_b.is_empty(),
+                PendingView::delete(&plan.delete_b),
                 *dry_run,
                 *auto_yes,
             )?;
@@ -741,23 +741,59 @@ fn ensure_root_ready(root: &dyn roots::Root) -> Result<()> {
     Ok(())
 }
 
-fn prompt_category(label: &str) -> Result<bool> {
-    print!("Allow {label}? [y/N]: ");
-    io::stdout().flush()?;
-    let mut input = String::new();
-    io::stdin().read_line(&mut input)?;
-    let decision = input.trim().to_lowercase();
-    Ok(matches!(decision.as_str(), "y" | "yes"))
+enum PendingView<'a> {
+    Copy(&'a [state::Entry]),
+    Delete(&'a [plan::DeleteOp]),
+}
+
+impl<'a> PendingView<'a> {
+    fn copy(entries: &'a [state::Entry]) -> Option<Self> {
+        if entries.is_empty() {
+            None
+        } else {
+            Some(Self::Copy(entries))
+        }
+    }
+
+    fn delete(entries: &'a [plan::DeleteOp]) -> Option<Self> {
+        if entries.is_empty() {
+            None
+        } else {
+            Some(Self::Delete(entries))
+        }
+    }
+
+    fn len(&self) -> usize {
+        match self {
+            PendingView::Copy(entries) => entries.len(),
+            PendingView::Delete(entries) => entries.len(),
+        }
+    }
+
+    fn print(&self, label: &str) {
+        match self {
+            PendingView::Copy(entries) => {
+                for entry in *entries {
+                    println!("{} {}", label, entry.path);
+                }
+            }
+            PendingView::Delete(entries) => {
+                for entry in *entries {
+                    println!("{} {}", label, entry.path);
+                }
+            }
+        }
+    }
 }
 
 fn resolve_category_setting(
     choice: Option<bool>,
     label: &str,
-    has_ops: bool,
+    view: Option<PendingView<'_>>,
     dry_run: bool,
     auto_yes: bool,
 ) -> Result<bool> {
-    if !has_ops {
+    if view.as_ref().map(|v| v.len()).unwrap_or(0) == 0 {
         return Ok(true);
     }
     if let Some(value) = choice {
@@ -766,7 +802,31 @@ fn resolve_category_setting(
     if dry_run || auto_yes {
         Ok(true)
     } else {
-        prompt_category(label)
+        prompt_category(label, view.as_ref())
+    }
+}
+
+fn prompt_category(label: &str, view: Option<&PendingView<'_>>) -> Result<bool> {
+    loop {
+        print!("Allow {label}? [y/dry/N]: ");
+        io::stdout().flush()?;
+        let mut input = String::new();
+        io::stdin().read_line(&mut input)?;
+        let decision = input.trim().to_lowercase();
+        match decision.as_str() {
+            "y" | "yes" => return Ok(true),
+            "" | "n" | "no" => return Ok(false),
+            "dry" | "d" => {
+                if let Some(v) = view {
+                    println!("\nPending {label}:");
+                    v.print(label);
+                    println!();
+                } else {
+                    println!("No pending items for {label}.");
+                }
+            }
+            _ => println!("Please answer 'y', 'n', or 'dry'."),
+        }
     }
 }
 
