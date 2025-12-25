@@ -15,8 +15,8 @@ fn make_entry(path: &str, mtime: i64) -> Entry {
     }
 }
 
-fn empty_filter() -> Filter {
-    Filter::new(&[], &[]).unwrap()
+fn include_all_filter() -> Filter {
+    Filter::new(&["**".to_string()], &[]).unwrap()
 }
 
 #[test]
@@ -26,7 +26,7 @@ fn test_diff_basic_created() {
     let scan_b = vec![];
     let state_b = vec![];
 
-    let filter = empty_filter();
+    let filter = include_all_filter();
     let diff = DiffEngine::diff(scan_a, state_a, scan_b, state_b, &filter);
     assert_eq!(diff.len(), 1);
     let d = &diff[0];
@@ -46,7 +46,7 @@ fn test_diff_both_modified_conflict() {
     let scan_b = vec![e_b.clone()];
     let state_b = vec![e_state.clone()];
 
-    let filter = empty_filter();
+    let filter = include_all_filter();
     let diff = DiffEngine::diff(scan_a, state_a, scan_b, state_b, &filter);
     assert_eq!(diff.len(), 1);
     let d = &diff[0];
@@ -67,7 +67,7 @@ fn test_diff_propagated_delete() {
     let scan_b = vec![e_state.clone()];
     let state_b = vec![e_state.clone()];
 
-    let filter = empty_filter();
+    let filter = include_all_filter();
     let diff = DiffEngine::diff(scan_a, state_a, scan_b, state_b, &filter);
     assert_eq!(diff.len(), 1);
     let d = &diff[0];
@@ -85,7 +85,7 @@ fn test_diff_delete_vs_create_conflict() {
     let scan_b = vec![];
     let state = vec![prev.clone()];
 
-    let filter = empty_filter();
+    let filter = include_all_filter();
     let diff = DiffEngine::diff(scan_a, state.clone(), scan_b, state, &filter);
     assert_eq!(diff.len(), 1);
     assert!(matches!(
@@ -100,7 +100,7 @@ fn test_diff_both_created_identical_no_conflict() {
     entry.hash = Some(vec![1, 2, 3]);
     let scan_a = vec![entry.clone()];
     let scan_b = vec![entry.clone()];
-    let filter = empty_filter();
+    let filter = include_all_filter();
     let diffs = DiffEngine::diff(scan_a, vec![], scan_b, vec![], &filter);
     assert_eq!(diffs.len(), 1);
     assert!(matches!(diffs[0].action, SyncAction::NoOp));
@@ -115,7 +115,7 @@ fn test_diff_both_modified_identical_no_conflict() {
     let scan_a = vec![updated.clone()];
     let scan_b = vec![updated.clone()];
     let state = vec![prev];
-    let filter = empty_filter();
+    let filter = include_all_filter();
     let diffs = DiffEngine::diff(scan_a, state.clone(), scan_b, state, &filter);
     assert_eq!(diffs.len(), 1);
     assert!(matches!(diffs[0].action, SyncAction::NoOp));
@@ -132,7 +132,7 @@ fn test_balanced_detects_hash_change() {
     let scan_b = vec![state_entry.clone()];
     let state_b = vec![state_entry];
 
-    let filter = empty_filter();
+    let filter = include_all_filter();
     let diff_hash = DiffEngine::diff(scan_a, state_a, scan_b, state_b, &filter);
     assert!(matches!(diff_hash[0].action, SyncAction::CopyAtoB));
 }
@@ -149,7 +149,7 @@ fn test_balanced_skips_false_positive_when_hash_matches() {
     let state_a = vec![state_entry.clone()];
     let scan_b = vec![state_entry.clone()];
     let state_b = vec![state_entry];
-    let filter = empty_filter();
+    let filter = include_all_filter();
 
     let diffs = DiffEngine::diff(scan_a, state_a, scan_b, state_b, &filter);
     assert!(matches!(diffs[0].action, SyncAction::NoOp));
@@ -177,6 +177,23 @@ fn test_diff_ignore_safe() {
     assert_eq!(diff.len(), 1);
     let d = &diff[0];
     assert_eq!(d.change_a.change, ChangeType::Unchanged); // Treated as Unchanged because Ignored
+    assert_eq!(d.change_b.change, ChangeType::Unchanged);
+    assert!(matches!(d.action, SyncAction::NoOp));
+}
+
+#[test]
+fn test_diff_include_empty_ignores_all() {
+    let e_state = make_entry("file.txt", 100);
+    let scan_a = vec![];
+    let scan_b = vec![];
+    let state_a = vec![e_state.clone()];
+    let state_b = vec![e_state.clone()];
+
+    let filter = Filter::new(&[], &[]).unwrap();
+    let diff = DiffEngine::diff(scan_a, state_a, scan_b, state_b, &filter);
+    assert_eq!(diff.len(), 1);
+    let d = &diff[0];
+    assert_eq!(d.change_a.change, ChangeType::Unchanged);
     assert_eq!(d.change_b.change, ChangeType::Unchanged);
     assert!(matches!(d.action, SyncAction::NoOp));
 }

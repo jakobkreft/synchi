@@ -4,6 +4,7 @@ use anyhow::{bail, Context, Result};
 use std::io::{self, Read};
 use std::path::{Path, PathBuf};
 use std::process::{Child, ChildStdout, Command, Stdio};
+use std::thread::JoinHandle;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 #[derive(Clone)]
@@ -101,11 +102,29 @@ mod tests {
 struct SshRead {
     child: Child,
     stdout: ChildStdout,
+    stderr_handle: Option<JoinHandle<io::Result<Vec<u8>>>>,
+    done: bool,
+    error: Option<io::Error>,
 }
 
 impl Read for SshRead {
     fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
-        self.stdout.read(buf)
+        if let Some(err) = self.error.take() {
+            self.error = Some(io::Error::new(err.kind(), err.to_string()));
+            return Err(err);
+        }
+        if self.done {
+            return Ok(0);
+        }
+        let read = self.stdout.read(buf)?;
+        if read == 0 {
+            if let Err(err) = self.finalize() {
+                self.error = Some(io::Error::new(err.kind(), err.to_string()));
+                return Err(err);
+            }
+            self.done = true;
+        }
+        Ok(read)
     }
 }
 
@@ -113,6 +132,42 @@ impl Drop for SshRead {
     fn drop(&mut self) {
         let _ = self.child.kill();
         let _ = self.child.wait();
+        if let Some(handle) = self.stderr_handle.take() {
+            let _ = handle.join();
+        }
+    }
+}
+
+impl SshRead {
+    fn finalize(&mut self) -> io::Result<()> {
+        let status = self.child.wait()?;
+        let stderr = match self.stderr_handle.take() {
+            Some(handle) => match handle.join() {
+                Ok(result) => result?,
+                Err(_) => {
+                    return Err(io::Error::new(
+                        io::ErrorKind::Other,
+                        "ssh stderr thread panicked",
+                    ))
+                }
+            },
+            None => Vec::new(),
+        };
+        if status.success() {
+            return Ok(());
+        }
+        let stderr_str = String::from_utf8_lossy(&stderr);
+        let trimmed = stderr_str.trim();
+        let mut message = String::from("remote read failed");
+        if !trimmed.is_empty() {
+            message.push_str(": ");
+            message.push_str(trimmed);
+        } else if let Some(code) = status.code() {
+            message.push_str(&format!(" (exit code {code})"));
+        } else {
+            message.push_str(" (terminated by signal)");
+        }
+        Err(io::Error::new(io::ErrorKind::Other, message))
     }
 }
 
@@ -188,9 +243,25 @@ impl Root for SshRoot {
         let mut cmd = self.ssh_command();
         cmd.arg(format!("cat -- {abs_path_q}"));
 
-        let mut child = cmd.stdout(Stdio::piped()).spawn()?;
+        let mut child = cmd
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()?;
         let stdout = child.stdout.take().context("Failed to open stdout")?;
-        Ok(Box::new(SshRead { child, stdout }))
+        let stderr = child.stderr.take().context("Failed to open stderr")?;
+        let stderr_handle = std::thread::spawn(move || {
+            let mut buf = Vec::new();
+            let mut stderr = stderr;
+            stderr.read_to_end(&mut buf)?;
+            Ok(buf)
+        });
+        Ok(Box::new(SshRead {
+            child,
+            stdout,
+            stderr_handle: Some(stderr_handle),
+            done: false,
+            error: None,
+        }))
     }
 
     fn write_file(&self, path: &Path, content: &mut dyn Read) -> Result<()> {

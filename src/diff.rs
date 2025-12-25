@@ -86,7 +86,9 @@ impl DiffEngine {
             // If it's in DB but ignored now, Scan is None. State is Some.
             // We treat it as "Ignored".
 
-            let ignored = filter.is_ignored(std::path::Path::new(&path));
+            let path_ref = std::path::Path::new(&path);
+            let included = filter.is_included(path_ref);
+            let ignored = filter.is_ignored(path_ref) || !included;
 
             let change_a = Self::classify_side(
                 &path,

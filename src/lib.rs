@@ -164,6 +164,9 @@ pub fn run(cli: Cli) -> Result<()> {
             let include_patterns = config.include.as_deref().unwrap_or(&default_include);
             let default_ignore = vec![];
             let ignore_patterns = config.ignore.as_deref().unwrap_or(&default_ignore);
+            if include_patterns.is_empty() {
+                tracing::warn!("Include patterns are empty; nothing will be scanned or synced.");
+            }
             let filter = scan::Filter::new(include_patterns, ignore_patterns)?;
 
             let label_a = format!("Root A ({})", root_a.path().display());
@@ -288,6 +291,9 @@ pub fn run(cli: Cli) -> Result<()> {
             let default_ignore = vec![];
             let ignore_patterns = config.ignore.as_deref().unwrap_or(&default_ignore);
 
+            if include_patterns.is_empty() {
+                tracing::warn!("Include patterns are empty; nothing will be scanned or synced.");
+            }
             let filter = scan::Filter::new(include_patterns, ignore_patterns)?;
 
             let label_a = format!("Root A ({})", root_a.path().display());

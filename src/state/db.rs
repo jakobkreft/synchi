@@ -261,51 +261,43 @@ impl StateDb {
 
     pub fn queue_plan(&self, plan: &Plan) -> Result<()> {
         self.conn.execute("BEGIN TRANSACTION", [])?;
-        self.conn.execute("DELETE FROM pending_copy_ops", [])?;
-        self.conn.execute("DELETE FROM pending_delete_ops", [])?;
+        let result: Result<()> = (|| {
+            self.conn.execute("DELETE FROM pending_copy_ops", [])?;
+            self.conn.execute("DELETE FROM pending_delete_ops", [])?;
 
-        for entry in &plan.copy_a_to_b {
-            self.insert_pending_copy(CopyDirection::AtoB, entry)?;
-        }
-        for entry in &plan.copy_b_to_a {
-            self.insert_pending_copy(CopyDirection::BtoA, entry)?;
-        }
-        for del in &plan.delete_a {
-            self.insert_pending_delete(DeleteSide::RootA, del)?;
-        }
-        for del in &plan.delete_b {
-            self.insert_pending_delete(DeleteSide::RootB, del)?;
+            for entry in &plan.copy_a_to_b {
+                self.insert_pending_copy(CopyDirection::AtoB, entry)?;
+            }
+            for entry in &plan.copy_b_to_a {
+                self.insert_pending_copy(CopyDirection::BtoA, entry)?;
+            }
+            for del in &plan.delete_a {
+                self.insert_pending_delete(DeleteSide::RootA, del)?;
+            }
+            for del in &plan.delete_b {
+                self.insert_pending_delete(DeleteSide::RootB, del)?;
+            }
+            Ok(())
+        })();
+
+        if let Err(err) = result {
+            let _ = self.conn.execute("ROLLBACK", []);
+            return Err(err);
         }
 
-        self.conn.execute("COMMIT", [])?;
+        if let Err(err) = self.conn.execute("COMMIT", []) {
+            let _ = self.conn.execute("ROLLBACK", []);
+            return Err(err.into());
+        }
         Ok(())
     }
 
     fn insert_pending_copy(&self, direction: CopyDirection, entry: &Entry) -> Result<()> {
-        self.conn.execute(
-            "INSERT INTO pending_copy_ops
-                (direction, path, kind, size, mtime, mode, hash, link_target)
-                VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
-            params![
-                copy_direction_to_int(direction),
-                entry.path,
-                kind_to_int(entry.kind),
-                entry.size,
-                entry.mtime,
-                entry.mode,
-                entry.hash,
-                entry.link_target
-            ],
-        )?;
-        Ok(())
+        insert_pending_copy_conn(&self.conn, direction, entry)
     }
 
     fn insert_pending_delete(&self, side: DeleteSide, op: &DeleteOp) -> Result<()> {
-        self.conn.execute(
-            "INSERT INTO pending_delete_ops (side, path, kind) VALUES (?1, ?2, ?3)",
-            params![delete_side_to_int(side), op.path, kind_to_int(op.kind)],
-        )?;
-        Ok(())
+        insert_pending_delete_conn(&self.conn, side, op)
     }
 
     pub fn refresh_metadata(&self, entries: &[Entry]) -> Result<()> {
@@ -439,15 +431,27 @@ impl StateDb {
             return Ok(());
         }
         self.conn.execute("BEGIN TRANSACTION", [])?;
-        for del in deletes {
-            self.delete_entry(&del.path)?;
+        let result: Result<()> = (|| {
+            for del in deletes {
+                self.delete_entry(&del.path)?;
+            }
+            delete_by_ids(
+                &self.conn,
+                "pending_delete_ops",
+                deletes.iter().map(|d| d.id),
+            )?;
+            Ok(())
+        })();
+
+        if let Err(err) = result {
+            let _ = self.conn.execute("ROLLBACK", []);
+            return Err(err);
         }
-        delete_by_ids(
-            &self.conn,
-            "pending_delete_ops",
-            deletes.iter().map(|d| d.id),
-        )?;
-        self.conn.execute("COMMIT", [])?;
+
+        if let Err(err) = self.conn.execute("COMMIT", []) {
+            let _ = self.conn.execute("ROLLBACK", []);
+            return Err(err.into());
+        }
         Ok(())
     }
 }
@@ -513,6 +517,33 @@ fn kind_to_int(kind: EntryKind) -> i32 {
         EntryKind::Dir => 1,
         EntryKind::Symlink => 2,
     }
+}
+
+fn insert_pending_copy_conn(conn: &Connection, direction: CopyDirection, entry: &Entry) -> Result<()> {
+    conn.execute(
+        "INSERT INTO pending_copy_ops
+            (direction, path, kind, size, mtime, mode, hash, link_target)
+            VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+        params![
+            copy_direction_to_int(direction),
+            entry.path,
+            kind_to_int(entry.kind),
+            entry.size,
+            entry.mtime,
+            entry.mode,
+            entry.hash,
+            entry.link_target
+        ],
+    )?;
+    Ok(())
+}
+
+fn insert_pending_delete_conn(conn: &Connection, side: DeleteSide, op: &DeleteOp) -> Result<()> {
+    conn.execute(
+        "INSERT INTO pending_delete_ops (side, path, kind) VALUES (?1, ?2, ?3)",
+        params![delete_side_to_int(side), op.path, kind_to_int(op.kind)],
+    )?;
+    Ok(())
 }
 
 fn copy_direction_to_int(direction: CopyDirection) -> i32 {
