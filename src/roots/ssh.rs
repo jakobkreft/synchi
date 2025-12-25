@@ -1,4 +1,5 @@
 use super::{RemoteCaps, Root, RootMetadata, RootType};
+use crate::shell::{shell_quote, shell_quote_path};
 use anyhow::{bail, Context, Result};
 use std::io::{self, Read};
 use std::path::{Path, PathBuf};
@@ -138,7 +139,8 @@ impl Root for SshRoot {
         // stat -c "%F %s %Y %f" path
         // output ex: "regular file 1024 1678888888 81a4"
         // Note: %f gives raw mode in hex.
-        let cmd_str = format!("stat -c '%F|%s|%Y|%f' {:?}", abs_path);
+        let abs_path_q = shell_quote_path(&abs_path);
+        let cmd_str = format!("stat -c '%F|%s|%Y|%f' -- {abs_path_q}");
 
         let (out, err, code) = self.exec(&cmd_str)?;
         if code != 0 {
@@ -164,37 +166,42 @@ impl Root for SshRoot {
 
     fn try_lock(&self, path: &Path, info: &str) -> Result<()> {
         let abs_path = self.root_path.join(path);
+        let abs_path_q = shell_quote_path(&abs_path);
         // Remote locking: mkdir .synchi/lockdir
         // mkdir is atomic on POSIX.
         // We also want to write the info inside.
         // Step 1: mkdir lock_path
-        let (_out, err, code) = self.exec(&format!("mkdir {:?}", abs_path))?;
+        let (_out, err, code) = self.exec(&format!("mkdir -- {abs_path_q}"))?;
         if code != 0 {
             bail!("Failed to acquire lock: {}", String::from_utf8_lossy(&err));
         }
         // Step 2: write info to lock_path/owner
         let info_path = abs_path.join("owner");
         let info_str = info.to_string();
+        let info_q = shell_quote(&info_str);
+        let info_path_q = shell_quote_path(&info_path);
         // Use a temp implementation of write call? Or just echo.
         // Warning: echo info > path is risky if info has special chars, but PID/Host is usually safe.
         // We'll trust info is simple for now, or sanitize it.
         // Assuming strictly alphanumeric + logic.
-        self.exec(&format!("echo {:?} > {:?}", info_str, info_path))?;
+        self.exec(&format!("printf '%s' {info_q} > {info_path_q}"))?;
         Ok(())
     }
 
     fn unlock(&self, path: &Path) -> Result<()> {
         let abs_path = self.root_path.join(path);
+        let abs_path_q = shell_quote_path(&abs_path);
         // rm -rf lock_path
-        self.exec(&format!("rm -rf {:?}", abs_path))?;
+        self.exec(&format!("rm -rf -- {abs_path_q}"))?;
         Ok(())
     }
 
     fn open_read(&self, path: &Path) -> Result<Box<dyn Read + Send>> {
         let abs_path = self.root_path.join(path);
+        let abs_path_q = shell_quote_path(&abs_path);
         // ssh user@host "cat 'path'"
         let mut cmd = self.ssh_command();
-        cmd.arg(format!("cat {:?}", abs_path)); // simple quoting
+        cmd.arg(format!("cat -- {abs_path_q}"));
 
         let child = cmd.stdout(Stdio::piped()).spawn()?;
         let stdout = child.stdout.context("Failed to open stdout")?;
@@ -209,14 +216,16 @@ impl Root for SshRoot {
 
     fn write_file(&self, path: &Path, content: &mut dyn Read) -> Result<()> {
         let abs_path = self.root_path.join(path);
+        let abs_path_q = shell_quote_path(&abs_path);
         let _parent = abs_path.parent().unwrap();
 
         // Ensure parent exists? optional but good.
         // Write to temp: path.synchi-tmp
         let tmp_path = format!("{}.synchi-tmp", abs_path.display());
+        let tmp_path_q = shell_quote(&tmp_path);
 
         let mut cmd = self.ssh_command();
-        cmd.arg(format!("cat > {:?}", tmp_path));
+        cmd.arg(format!("cat > {tmp_path_q}"));
         cmd.stdin(Stdio::piped());
 
         let mut child = cmd.spawn()?;
@@ -231,40 +240,44 @@ impl Root for SshRoot {
         }
 
         // Rename
-        self.exec(&format!("mv {:?} {:?}", tmp_path, abs_path))?;
+        self.exec(&format!("mv -- {tmp_path_q} {abs_path_q}"))?;
 
         Ok(())
     }
 
     fn set_meta(&self, path: &Path, mode: u32, mtime: SystemTime) -> Result<()> {
         let abs_path = self.root_path.join(path);
+        let abs_path_q = shell_quote_path(&abs_path);
         let ts = mtime.duration_since(UNIX_EPOCH)?.as_secs();
         // chmod and touch
         // chmod 0755 path
         // touch -d @ts path (GNU) or -t (POSIX)
         // busybox supports -d @seconds usually.
         self.exec(&format!(
-            "chmod {:o} {:?} && touch -d @{} {:?}",
-            mode, abs_path, ts, abs_path
+            "chmod {:o} -- {abs_path_q} && touch -d @{ts} -- {abs_path_q}",
+            mode
         ))?;
         Ok(())
     }
 
     fn mkdirs(&self, path: &Path) -> Result<()> {
         let abs_path = self.root_path.join(path);
-        self.exec(&format!("mkdir -p {:?}", abs_path))?;
+        let abs_path_q = shell_quote_path(&abs_path);
+        self.exec(&format!("mkdir -p -- {abs_path_q}"))?;
         Ok(())
     }
 
     fn remove_file(&self, path: &Path) -> Result<()> {
         let abs_path = self.root_path.join(path);
-        self.exec(&format!("rm {:?}", abs_path))?;
+        let abs_path_q = shell_quote_path(&abs_path);
+        self.exec(&format!("rm -- {abs_path_q}"))?;
         Ok(())
     }
 
     fn remove_dir(&self, path: &Path) -> Result<()> {
         let abs_path = self.root_path.join(path);
-        self.exec(&format!("rmdir {:?}", abs_path))?; // rmdir for empty dir
+        let abs_path_q = shell_quote_path(&abs_path);
+        self.exec(&format!("rmdir -- {abs_path_q}"))?; // rmdir for empty dir
         Ok(())
     }
 
@@ -295,15 +308,16 @@ impl Root for SshRoot {
 
         // Construct command: cd root && sha256sum "path1" "path2" ...
         let root_str = self.root_path.to_string_lossy();
-        let mut cmd = format!("cd {:?} && sha256sum", root_str);
+        let root_q = shell_quote(root_str.as_ref());
+        let mut cmd = format!("cd {root_q} && sha256sum --");
 
         for path in paths {
             // path is relative to root (from Entry)
             // normalize_path returns it relative if default, which is good.
             let p = self.normalize_path(path)?;
-            cmd.push_str(" '");
-            cmd.push_str(&p.to_string_lossy().replace("'", "'\\''"));
-            cmd.push('\'');
+            let p_q = shell_quote(p.to_string_lossy().as_ref());
+            cmd.push(' ');
+            cmd.push_str(&p_q);
         }
 
         let (out, _, code) = self.exec(&cmd)?;

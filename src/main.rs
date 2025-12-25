@@ -18,6 +18,7 @@ mod plan;
 mod progress;
 mod roots;
 mod scan;
+mod shell;
 mod state;
 mod transport;
 mod ui;

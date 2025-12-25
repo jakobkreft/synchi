@@ -2,6 +2,7 @@ use crate::journal::{format_bytes, ExecutionStats, Journal, OpResult, Operation}
 use crate::plan::{CopyDirection, DeleteSide};
 use crate::progress;
 use crate::roots::{EntryKind, Root, RootType, SshRoot};
+use crate::shell::{shell_quote, shell_quote_path};
 use crate::state::{CopyMetrics, PendingCopy, PendingDelete, StateDb};
 use crate::transport::{CopyBehavior, CopyStream, Transport};
 use anyhow::{bail, Context, Result};
@@ -112,6 +113,8 @@ impl<'a> Executor<'a> {
         let mut chunk_records: Vec<(Operation, OpResult)> = Vec::new();
         let nonbyte_progress = Arc::new(AtomicU64::new(0));
         let mut monitor = MonitorGuard::new();
+        let mut pending_commits: Vec<PendingCopy> = Vec::new();
+        let mut streaming = false;
 
         loop {
             let chunk = self.db.fetch_pending_copies(direction, self.copy_chunk)?;
@@ -125,6 +128,7 @@ impl<'a> Executor<'a> {
                     Transport::persistent_stream(src_root, dest_root, self.behavior)
                         .context("initializing transfer stream")?,
                 );
+                streaming = stream.as_ref().map(|s| s.is_streaming()).unwrap_or(false);
                 if !monitor.is_active() {
                     if let Some(counter) = stream.as_ref().unwrap().progress_counter() {
                         monitor.activate(ProgressMonitor::start(
@@ -179,15 +183,26 @@ impl<'a> Executor<'a> {
                 }
             }
 
-            self.db
-                .complete_pending_copies(&chunk)
-                .context("committing copy results to state DB")?;
+            if streaming {
+                pending_commits.extend(chunk.into_iter());
+            } else {
+                self.db
+                    .complete_pending_copies(&chunk)
+                    .context("committing copy results to state DB")?;
+            }
         }
 
         if let Some(stream) = stream {
             stream
                 .finish()
                 .context("finalizing streaming copy session")?;
+            if streaming && !pending_commits.is_empty() {
+                for batch in pending_commits.chunks(self.copy_chunk) {
+                    self.db
+                        .complete_pending_copies(batch)
+                        .context("committing copy results to state DB")?;
+                }
+            }
         }
 
         monitor.stop();
@@ -399,30 +414,6 @@ fn run_remote_delete(root: &SshRoot, deletes: &[PendingDelete]) -> Result<()> {
         bail!("remote delete failed: {}", message.trim());
     }
     Ok(())
-}
-
-fn shell_quote_path(path: &Path) -> String {
-    let as_str = path.to_string_lossy();
-    shell_quote(as_str.as_ref())
-}
-
-fn shell_quote(input: &str) -> String {
-    if input.is_empty() {
-        return "''".to_string();
-    }
-    if !input.contains('\'') {
-        return format!("'{}'", input);
-    }
-    let mut quoted = String::from("'");
-    for ch in input.chars() {
-        if ch == '\'' {
-            quoted.push_str("'\"'\"'");
-        } else {
-            quoted.push(ch);
-        }
-    }
-    quoted.push('\'');
-    quoted
 }
 
 struct ChunkProgress {

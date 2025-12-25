@@ -1,6 +1,7 @@
 use super::filter::ScanTargets;
 use super::Filter;
 use crate::roots::{EntryKind, RemoteCaps, Root, SshRoot};
+use crate::shell::shell_quote;
 use crate::state::Entry;
 use anyhow::{bail, Result};
 use indicatif::ProgressBar;
@@ -70,6 +71,7 @@ impl<'a> RemoteScanner<'a> {
     ) -> Result<Vec<Entry>> {
         const PRINTF_FMT: &str = "'%p\\0%y\\0%s\\0%n\\0%T@\\0%m\\0%l\\0'";
         let root_str = self.root.path().to_string_lossy();
+        let root_q = shell_quote(root_str.as_ref());
         let find_cmd = match targets {
             ScanTargets::All => format!("find . -printf {PRINTF_FMT}"),
             ScanTargets::Limited(prefixes) => {
@@ -80,7 +82,7 @@ impl<'a> RemoteScanner<'a> {
                     for prefix in prefixes {
                         let rel = prefix.to_string_lossy().replace('\\', "/");
                         let rel = format!("./{rel}");
-                        let quoted = shell_escape(&rel);
+                        let quoted = shell_quote(&rel);
                         segments.push(format!(
                             "if [ -e {path} ] || [ -L {path} ]; then find {path} -printf {printf}; else true; fi",
                             path = quoted,
@@ -92,7 +94,7 @@ impl<'a> RemoteScanner<'a> {
             }
             ScanTargets::None => "true".to_string(),
         };
-        let cmd = format!("cd {:?} && {}", root_str, find_cmd);
+        let cmd = format!("cd {root_q} && {find_cmd}");
         let (out, err, code) = self.root.exec(&cmd)?;
         if code != 0 {
             bail!("Remote find failed: {}", String::from_utf8_lossy(&err));
@@ -190,9 +192,4 @@ impl<'a> RemoteScanner<'a> {
 
         Ok(entries)
     }
-}
-
-fn shell_escape(input: &str) -> String {
-    let escaped = input.replace('\'', "'\\''");
-    format!("'{escaped}'")
 }

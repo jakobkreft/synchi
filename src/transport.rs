@@ -1,4 +1,5 @@
 use crate::roots::{LocalRoot, Root, RootType, SshRoot};
+use crate::shell::shell_quote;
 use anyhow::{anyhow, bail, Context, Result};
 use std::io::{Read, Write};
 use std::process::{Child, ChildStderr, ChildStdin, ChildStdout, Command, Stdio};
@@ -113,6 +114,10 @@ impl<'a> CopyStream<'a> {
             CopyChannel::Tar(stream) => Some(stream.progress_counter()),
             _ => None,
         }
+    }
+
+    pub fn is_streaming(&self) -> bool {
+        matches!(&self.channel, CopyChannel::Tar(_))
     }
 }
 
@@ -313,9 +318,9 @@ fn spawn_ssh_tar_pack(
 ) -> Result<(Child, ChildStdin, ChildStdout, Option<ChildStderr>)> {
     let mut cmd = root.ssh_command();
     let root_str = root.path().to_string_lossy();
+    let root_q = shell_quote(root_str.as_ref());
     cmd.arg(format!(
-        "cd {:?} && tar -cf - --null --no-recursion -T -",
-        root_str
+        "cd {root_q} && tar -cf - --null --no-recursion -T -"
     ));
     cmd.stdin(Stdio::piped());
     cmd.stdout(Stdio::piped());
@@ -333,7 +338,8 @@ fn spawn_ssh_tar_unpack(
 ) -> Result<(Child, ChildStdin, Option<ChildStderr>)> {
     let mut cmd = root.ssh_command();
     let root_str = root.path().to_string_lossy();
-    let mut tar_cmd = format!("cd {:?} && tar -xpf -", root_str);
+    let root_q = shell_quote(root_str.as_ref());
+    let mut tar_cmd = format!("cd {root_q} && tar -xpf -");
     if behavior.preserve_permissions {
         tar_cmd.push_str(" --preserve-permissions");
     } else {
