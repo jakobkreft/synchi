@@ -2,7 +2,7 @@ use super::{Root, RootMetadata, RootType};
 use anyhow::{Context, Result};
 use std::fs::{self, File, OpenOptions};
 use std::io::{self, Read, Write};
-use std::os::unix::fs::PermissionsExt;
+use std::os::unix::fs::{symlink, PermissionsExt};
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::time::SystemTime;
@@ -15,7 +15,9 @@ pub struct LocalRoot {
 
 impl LocalRoot {
     pub fn new(path: impl AsRef<Path>) -> Result<Self> {
-        let root_path = fs::canonicalize(path).context("Failed to canonicalize local root path")?;
+        let expanded = expand_tilde(path.as_ref())?;
+        let root_path =
+            fs::canonicalize(&expanded).context("Failed to canonicalize local root path")?;
         Ok(Self { root_path })
     }
 
@@ -30,6 +32,22 @@ impl LocalRoot {
             mode: meta.permissions().mode(),
         }
     }
+}
+
+fn expand_tilde(path: &Path) -> Result<PathBuf> {
+    let raw = path.to_string_lossy();
+    if raw == "~" {
+        let home = dirs::home_dir().context("Failed to resolve ~ (home directory not set)")?;
+        return Ok(home);
+    }
+    if let Some(rest) = raw.strip_prefix("~/") {
+        let home = dirs::home_dir().context("Failed to resolve ~ (home directory not set)")?;
+        return Ok(home.join(rest));
+    }
+    if raw.starts_with('~') {
+        anyhow::bail!("Unsupported home expansion: {}", raw);
+    }
+    Ok(path.to_path_buf())
 }
 
 impl Root for LocalRoot {
@@ -85,8 +103,31 @@ impl Root for LocalRoot {
         let mut temp_file = NamedTempFile::new_in(parent_dir)?;
 
         io::copy(content, &mut temp_file)?;
-        temp_file.persist(&abs_path)?;
-        Ok(())
+        match temp_file.persist(&abs_path) {
+            Ok(_) => Ok(()),
+            Err(err) => {
+                if err.error.kind() == io::ErrorKind::AlreadyExists {
+                    fs::remove_file(&abs_path)?;
+                    err.file.persist(&abs_path)?;
+                    Ok(())
+                } else {
+                    Err(err.error.into())
+                }
+            }
+        }
+    }
+
+    fn create_symlink(&self, target: &str, path: &Path) -> Result<()> {
+        let abs_path = self.resolve(path)?;
+        if let Some(parent) = abs_path.parent() {
+            fs::create_dir_all(parent)?;
+        }
+        if let Err(err) = fs::remove_file(&abs_path) {
+            if err.kind() != io::ErrorKind::NotFound {
+                return Err(err.into());
+            }
+        }
+        symlink(target, abs_path).map_err(Into::into)
     }
 
     fn set_meta(&self, path: &Path, mode: u32, mtime: SystemTime) -> Result<()> {

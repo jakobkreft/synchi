@@ -142,6 +142,9 @@ pub trait Root: Send + Sync {
     /// Set metadata (mode, mtime)
     fn set_meta(&self, path: &Path, mode: u32, mtime: SystemTime) -> Result<()>;
 
+    /// Create a symlink at path pointing to target
+    fn create_symlink(&self, target: &str, path: &Path) -> Result<()>;
+
     /// Create directory (mkdir -p behavior preferred or one level?)
     /// Blueprint says `mkdirs`.
     fn mkdirs(&self, path: &Path) -> Result<()>;

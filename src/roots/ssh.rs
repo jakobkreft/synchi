@@ -231,7 +231,10 @@ impl Root for SshRoot {
     fn write_file(&self, path: &Path, content: &mut dyn Read) -> Result<()> {
         let abs_path = self.root_path.join(path);
         let abs_path_q = shell_quote_path(&abs_path);
-        let _parent = abs_path.parent().unwrap();
+        if let Some(parent) = abs_path.parent() {
+            let parent_q = shell_quote_path(parent);
+            self.exec_checked(&format!("mkdir -p -- {parent_q}"))?;
+        }
 
         // Ensure parent exists? optional but good.
         // Write to temp: path.synchi-tmp
@@ -271,6 +274,14 @@ impl Root for SshRoot {
             "chmod {:o} -- {abs_path_q} && touch -d @{ts} -- {abs_path_q}",
             mode
         ))?;
+        Ok(())
+    }
+
+    fn create_symlink(&self, target: &str, path: &Path) -> Result<()> {
+        let abs_path = self.root_path.join(path);
+        let abs_path_q = shell_quote_path(&abs_path);
+        let target_q = shell_quote(target);
+        self.exec_checked(&format!("rm -f -- {abs_path_q} && ln -s -- {target_q} {abs_path_q}"))?;
         Ok(())
     }
 

@@ -1,5 +1,6 @@
-use crate::roots::{LocalRoot, Root, RootType, SshRoot};
+use crate::roots::{EntryKind, LocalRoot, Root, RootType, SshRoot};
 use crate::shell::shell_quote;
+use crate::state::Entry;
 use anyhow::{anyhow, bail, Context, Result};
 use std::io::{Read, Write};
 use std::process::{Child, ChildStderr, ChildStdin, ChildStdout, Command, Stdio};
@@ -7,6 +8,7 @@ use std::sync::{
     atomic::{AtomicU64, Ordering},
     Arc,
 };
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use std::thread::JoinHandle;
 use tracing::debug;
 
@@ -49,6 +51,34 @@ impl Transport {
         Ok(())
     }
 
+    pub fn copy_entry(
+        src_root: &dyn Root,
+        dest_root: &dyn Root,
+        entry: &Entry,
+        behavior: CopyBehavior,
+    ) -> Result<()> {
+        let path = std::path::Path::new(&entry.path);
+        match entry.kind {
+            EntryKind::File => Transport::copy_file(src_root, dest_root, &entry.path, behavior),
+            EntryKind::Dir => {
+                dest_root.mkdirs(path)?;
+                if behavior.preserve_permissions {
+                    let mtime = entry_mtime(entry.mtime);
+                    dest_root.set_meta(path, entry.mode, mtime)?;
+                }
+                Ok(())
+            }
+            EntryKind::Symlink => {
+                let target = entry
+                    .link_target
+                    .as_deref()
+                    .ok_or_else(|| anyhow!("Missing symlink target for {}", entry.path))?;
+                dest_root.create_symlink(target, path)?;
+                Ok(())
+            }
+        }
+    }
+
     pub fn persistent_stream<'a>(
         src_root: &'a dyn Root,
         dest_root: &'a dyn Root,
@@ -87,15 +117,18 @@ enum CopyChannel<'a> {
 }
 
 impl<'a> CopyStream<'a> {
-    pub fn send_paths(&mut self, paths: &[String]) -> Result<()> {
+    pub fn send_entries(&mut self, entries: &[Entry]) -> Result<()> {
         match &mut self.channel {
-            CopyChannel::Tar(stream) => stream.send_paths(paths),
+            CopyChannel::Tar(stream) => {
+                let paths: Vec<String> = entries.iter().map(|e| e.path.clone()).collect();
+                stream.send_paths(&paths)
+            }
             CopyChannel::Manual {
                 src_root,
                 dest_root,
             } => {
-                for path in paths {
-                    Transport::copy_file(*src_root, *dest_root, path, self.behavior)?;
+                for entry in entries {
+                    Transport::copy_entry(*src_root, *dest_root, entry, self.behavior)?;
                 }
                 Ok(())
             }
@@ -118,6 +151,14 @@ impl<'a> CopyStream<'a> {
 
     pub fn is_streaming(&self) -> bool {
         matches!(&self.channel, CopyChannel::Tar(_))
+    }
+}
+
+fn entry_mtime(mtime: i64) -> SystemTime {
+    if mtime <= 0 {
+        UNIX_EPOCH
+    } else {
+        UNIX_EPOCH + Duration::from_secs(mtime as u64)
     }
 }
 

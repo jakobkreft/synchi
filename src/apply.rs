@@ -256,8 +256,8 @@ impl<'a> Executor<'a> {
             });
         }
         chunk_records.clear();
-        let paths: Vec<String> = copies.iter().map(|c| c.entry.path.clone()).collect();
-        if let Err(err) = stream.send_paths(&paths) {
+        let entries: Vec<crate::state::Entry> = copies.iter().map(|c| c.entry.clone()).collect();
+        if let Err(err) = stream.send_entries(&entries) {
             for copy in copies {
                 chunk_records.push((
                     Operation::new(
