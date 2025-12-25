@@ -1,7 +1,7 @@
 use anyhow::{Context, Result};
 use hostname::get;
 use indicatif::ProgressBar;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::io::{self, Cursor};
 use std::path::{Path, PathBuf};
 use std::sync::Once;
@@ -173,10 +173,12 @@ pub fn run(cli: Cli) -> Result<()> {
 
             let label_a = format!("Root A ({})", root_a.path().display());
             info!("Scanning {}", label_a);
-            let mut scan_a = run_scan_with_progress(&label_a, Some(state_hint), |pb| {
-                scan::LocalScanner::with_skip_hardlinks(&root_a, &filter, config.skip_hardlinks)
-                    .scan_with_progress(Some(pb))
-            }, &console)?;
+            let mut scan_a = run_scan_with_progress(
+                &label_a,
+                Some(state_hint),
+                |pb| scan::LocalScanner::new(&root_a, &filter).scan_with_progress(Some(pb)),
+                &console,
+            )?;
             let mut scan_b = if root_b.kind() == roots::RootType::Ssh {
                 let ssh_root = root_b
                     .as_any()
@@ -185,10 +187,12 @@ pub fn run(cli: Cli) -> Result<()> {
                 let caps = ssh_root.probe_caps()?;
                 let label_b = format!("Root B ({})", ssh_root.path().display());
                 info!("Scanning {}", label_b);
-                run_scan_with_progress(&label_b, Some(state_hint), |pb| {
-                    scan::RemoteScanner::new(ssh_root, &filter, caps, config.skip_hardlinks)
-                        .scan_with_progress(Some(pb))
-                }, &console)?
+                run_scan_with_progress(
+                    &label_b,
+                    Some(state_hint),
+                    |pb| scan::RemoteScanner::new(ssh_root, &filter, caps).scan_with_progress(Some(pb)),
+                    &console,
+                )?
             } else {
                 let local_b = root_b
                     .as_any()
@@ -196,11 +200,26 @@ pub fn run(cli: Cli) -> Result<()> {
                     .context("Root B is not local")?;
                 let label_b = format!("Root B ({})", local_b.path().display());
                 info!("Scanning {}", label_b);
-                run_scan_with_progress(&label_b, Some(state_hint), |pb| {
-                    scan::LocalScanner::with_skip_hardlinks(local_b, &filter, config.skip_hardlinks)
-                        .scan_with_progress(Some(pb))
-                }, &console)?
+                run_scan_with_progress(
+                    &label_b,
+                    Some(state_hint),
+                    |pb| scan::LocalScanner::new(local_b, &filter).scan_with_progress(Some(pb)),
+                    &console,
+                )?
             };
+            let hardlink_skip = if config.skip_hardlinks {
+                hardlink_skip_set(&scan_a, &scan_b)
+            } else {
+                HashSet::new()
+            };
+            if !hardlink_skip.is_empty() {
+                tracing::warn!(
+                    "Skipping {} hard-linked paths present on both roots.",
+                    hardlink_skip.len()
+                );
+                filter_entries(&mut scan_a, &hardlink_skip);
+                filter_entries(&mut scan_b, &hardlink_skip);
+            }
             let scan_a_count = scan_a.len();
             let scan_b_count = scan_b.len();
 
@@ -221,8 +240,12 @@ pub fn run(cli: Cli) -> Result<()> {
                 &console,
             )?;
 
-            let state_a = state_entries.clone();
-            let state_b = state_entries;
+            let mut state_a = state_entries.clone();
+            let mut state_b = state_entries;
+            if !hardlink_skip.is_empty() {
+                filter_entries(&mut state_a, &hardlink_skip);
+                filter_entries(&mut state_b, &hardlink_skip);
+            }
 
             let mut diffs = diff::DiffEngine::diff(scan_a, state_a, scan_b, state_b, &filter);
 
@@ -306,10 +329,12 @@ pub fn run(cli: Cli) -> Result<()> {
 
             let label_a = format!("Root A ({})", root_a.path().display());
             info!("Scanning {}", label_a);
-            let mut scan_a = run_scan_with_progress(&label_a, Some(state_hint), |pb| {
-                scan::LocalScanner::with_skip_hardlinks(&root_a, &filter, config.skip_hardlinks)
-                    .scan_with_progress(Some(pb))
-            }, &console)?;
+            let mut scan_a = run_scan_with_progress(
+                &label_a,
+                Some(state_hint),
+                |pb| scan::LocalScanner::new(&root_a, &filter).scan_with_progress(Some(pb)),
+                &console,
+            )?;
             let mut scan_b = if root_b.kind() == roots::RootType::Ssh {
                 let ssh_root = root_b
                     .as_any()
@@ -318,20 +343,37 @@ pub fn run(cli: Cli) -> Result<()> {
                 let caps = ssh_root.probe_caps()?;
                 let label_b = format!("Root B ({})", ssh_root.path().display());
                 info!("Scanning {}", label_b);
-                run_scan_with_progress(&label_b, Some(state_hint), |pb| {
-                    scan::RemoteScanner::new(ssh_root, &filter, caps, config.skip_hardlinks)
-                        .scan_with_progress(Some(pb))
-                }, &console)?
+                run_scan_with_progress(
+                    &label_b,
+                    Some(state_hint),
+                    |pb| scan::RemoteScanner::new(ssh_root, &filter, caps).scan_with_progress(Some(pb)),
+                    &console,
+                )?
             } else if let Some(local_b) = root_b.as_any().downcast_ref::<roots::LocalRoot>() {
                 let label_b = format!("Root B ({})", local_b.path().display());
                 info!("Scanning {}", label_b);
-                run_scan_with_progress(&label_b, Some(state_hint), |pb| {
-                    scan::LocalScanner::with_skip_hardlinks(local_b, &filter, config.skip_hardlinks)
-                        .scan_with_progress(Some(pb))
-                }, &console)?
+                run_scan_with_progress(
+                    &label_b,
+                    Some(state_hint),
+                    |pb| scan::LocalScanner::new(local_b, &filter).scan_with_progress(Some(pb)),
+                    &console,
+                )?
             } else {
                 anyhow::bail!("Unsupported root type for B");
             };
+            let hardlink_skip = if config.skip_hardlinks {
+                hardlink_skip_set(&scan_a, &scan_b)
+            } else {
+                HashSet::new()
+            };
+            if !hardlink_skip.is_empty() {
+                tracing::warn!(
+                    "Skipping {} hard-linked paths present on both roots.",
+                    hardlink_skip.len()
+                );
+                filter_entries(&mut scan_a, &hardlink_skip);
+                filter_entries(&mut scan_b, &hardlink_skip);
+            }
             let scan_a_count = scan_a.len();
             let scan_b_count = scan_b.len();
 
@@ -357,8 +399,12 @@ pub fn run(cli: Cli) -> Result<()> {
 
             let state_entries = db.list_entries()?;
             let state_count = state_entries.len();
-            let state_a = state_entries.clone();
-            let state_b = state_entries;
+            let mut state_a = state_entries.clone();
+            let mut state_b = state_entries;
+            if !hardlink_skip.is_empty() {
+                filter_entries(&mut state_a, &hardlink_skip);
+                filter_entries(&mut state_b, &hardlink_skip);
+            }
 
             let mut diffs = diff::DiffEngine::diff(scan_a, state_a, scan_b, state_b, &filter);
 
@@ -907,12 +953,91 @@ fn hash_batch(
     Ok(())
 }
 
+fn hardlink_skip_set(
+    scan_a: &[state::Entry],
+    scan_b: &[state::Entry],
+) -> HashSet<String> {
+    use crate::roots::EntryKind;
+    let hardlinks_a: HashSet<String> = scan_a
+        .iter()
+        .filter(|e| e.kind == EntryKind::File && e.nlink > 1)
+        .map(|e| e.path.clone())
+        .collect();
+    if hardlinks_a.is_empty() {
+        return HashSet::new();
+    }
+    let hardlinks_b: HashSet<String> = scan_b
+        .iter()
+        .filter(|e| e.kind == EntryKind::File && e.nlink > 1)
+        .map(|e| e.path.clone())
+        .collect();
+    if hardlinks_b.is_empty() {
+        return HashSet::new();
+    }
+    hardlinks_a
+        .intersection(&hardlinks_b)
+        .cloned()
+        .collect()
+}
+
+fn filter_entries(entries: &mut Vec<state::Entry>, skip: &HashSet<String>) {
+    if skip.is_empty() {
+        return;
+    }
+    entries.retain(|entry| !skip.contains(&entry.path));
+}
+
+#[cfg(test)]
+mod hardlink_skip_tests {
+    use super::*;
+    use crate::roots::EntryKind;
+
+    fn make_entry(path: &str, kind: EntryKind, nlink: u64) -> state::Entry {
+        state::Entry {
+            path: path.to_string(),
+            kind,
+            size: 0,
+            mtime: 0,
+            mode: 0o644,
+            nlink,
+            hash: None,
+            link_target: None,
+            deleted: false,
+        }
+    }
+
+    #[test]
+    fn hardlink_skip_requires_both_sides() {
+        let scan_a = vec![make_entry("file.txt", EntryKind::File, 2)];
+        let scan_b = vec![make_entry("file.txt", EntryKind::File, 1)];
+        let skip = hardlink_skip_set(&scan_a, &scan_b);
+        assert!(skip.is_empty());
+    }
+
+    #[test]
+    fn hardlink_skip_only_targets_files() {
+        let scan_a = vec![make_entry("dir", EntryKind::Dir, 2)];
+        let scan_b = vec![make_entry("dir", EntryKind::Dir, 2)];
+        let skip = hardlink_skip_set(&scan_a, &scan_b);
+        assert!(skip.is_empty());
+    }
+
+    #[test]
+    fn hardlink_skip_intersects_paths() {
+        let scan_a = vec![make_entry("file.txt", EntryKind::File, 2)];
+        let scan_b = vec![make_entry("file.txt", EntryKind::File, 3)];
+        let skip = hardlink_skip_set(&scan_a, &scan_b);
+        assert!(skip.contains("file.txt"));
+        assert_eq!(skip.len(), 1);
+    }
+}
+
 #[cfg(test)]
 mod hash_mode_tests {
     use super::*;
     use crate::roots::LocalRoot;
     use std::collections::HashMap;
-    use std::os::unix::fs::PermissionsExt;
+    use std::os::unix::fs::{MetadataExt, PermissionsExt};
     use tempfile::tempdir;
 
     fn entry_from_fs(path: &std::path::Path, rel: &str) -> state::Entry {
@@ -929,6 +1054,7 @@ mod hash_mode_tests {
             size: meta.len(),
             mtime,
             mode: meta.permissions().mode(),
+            nlink: meta.nlink(),
             hash: None,
             link_target: None,
             deleted: false,

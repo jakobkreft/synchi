@@ -9,6 +9,7 @@ fn make_entry(path: &str, mtime: i64) -> Entry {
         size: 100,
         mtime,
         mode: 0o644,
+        nlink: 1,
         hash: None,
         link_target: None,
         deleted: false,

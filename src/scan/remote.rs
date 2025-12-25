@@ -6,13 +6,12 @@ use crate::state::Entry;
 use anyhow::{bail, Result};
 use indicatif::ProgressBar;
 use std::path::Path;
-use tracing::{debug, instrument, warn};
+use tracing::{debug, instrument};
 
 pub struct RemoteScanner<'a> {
     root: &'a SshRoot,
     filter: &'a Filter,
     caps: RemoteCaps,
-    skip_hardlinks: bool,
 }
 
 fn kind_mode_bits(kind: EntryKind) -> u32 {
@@ -40,14 +39,8 @@ impl<'a> RemoteScanner<'a> {
         root: &'a SshRoot,
         filter: &'a Filter,
         caps: RemoteCaps,
-        skip_hardlinks: bool,
     ) -> Self {
-        Self {
-            root,
-            filter,
-            caps,
-            skip_hardlinks,
-        }
+        Self { root, filter, caps }
     }
 
     #[instrument(skip(self))]
@@ -163,11 +156,6 @@ impl<'a> RemoteScanner<'a> {
             let perm_bits = u32::from_str_radix(&mode_str, 8).unwrap_or(0);
             let mode = perm_bits | kind_mode_bits(kind);
 
-            if self.skip_hardlinks && kind == EntryKind::File && nlink > 1 {
-                warn!("Skipping hard link: {} (nlink={})", rel_path_str, nlink);
-                continue;
-            }
-
             let link_target = if kind == EntryKind::Symlink {
                 Some(String::from_utf8_lossy(link_bytes).to_string())
             } else {
@@ -180,6 +168,7 @@ impl<'a> RemoteScanner<'a> {
                 size,
                 mtime,
                 mode,
+                nlink,
                 hash: None,
                 link_target,
                 deleted: false,

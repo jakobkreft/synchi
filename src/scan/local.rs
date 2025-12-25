@@ -15,29 +15,11 @@ use walkdir::WalkDir;
 pub struct LocalScanner<'a> {
     root: &'a LocalRoot,
     filter: &'a Filter,
-    skip_hardlinks: bool,
 }
 
 impl<'a> LocalScanner<'a> {
-    #[cfg(test)]
     pub fn new(root: &'a LocalRoot, filter: &'a Filter) -> Self {
-        Self {
-            root,
-            filter,
-            skip_hardlinks: false,
-        }
-    }
-
-    pub fn with_skip_hardlinks(
-        root: &'a LocalRoot,
-        filter: &'a Filter,
-        skip_hardlinks: bool,
-    ) -> Self {
-        Self {
-            root,
-            filter,
-            skip_hardlinks,
-        }
+        Self { root, filter }
     }
 
     #[cfg(test)]
@@ -100,12 +82,6 @@ impl<'a> LocalScanner<'a> {
 
             let meta = fs::symlink_metadata(path)?;
 
-            if self.skip_hardlinks && meta.is_file() && meta.nlink() > 1 {
-                let path_str = rel_path.to_string_lossy();
-                warn!("Skipping hard link: {} (nlink={})", path_str, meta.nlink());
-                continue;
-            }
-
             let file_type = meta.file_type();
             let kind = if file_type.is_symlink() {
                 EntryKind::Symlink
@@ -136,6 +112,7 @@ impl<'a> LocalScanner<'a> {
                 .duration_since(SystemTime::UNIX_EPOCH)?
                 .as_secs() as i64;
             let mode = meta.permissions().mode();
+            let nlink = meta.nlink();
 
             let link_target = if kind == EntryKind::Symlink {
                 let target = fs::read_link(path)?.to_string_lossy().to_string();
@@ -156,6 +133,7 @@ impl<'a> LocalScanner<'a> {
                 size,
                 mtime,
                 mode,
+                nlink,
                 hash: None,
                 link_target,
                 deleted: false,
