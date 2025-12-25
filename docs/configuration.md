@@ -24,7 +24,7 @@ ignore = ["**/cache/**", "**/build/**"]
 hash_mode = "balanced"
 force = "none"
 
-skip_hardlinks = true
+hardlinks = "skip"
 preserve_owner = false
 preserve_permissions = true
 ````
@@ -41,7 +41,7 @@ Most users only need to adjust `root_a`, `root_b`, and possibly `include` / `ign
 | `ignore`               | Glob patterns of paths to exclude. `.synchi` is always ignored.                                          | `[]`         |
 | `force`                | `"root_a"`, `"root_b"`, or `"none"`. Forces one-way mirroring or allows two-way sync.                    | `"none"`     |
 | `hash_mode`            | `"balanced"` or `"always"`. Controls how aggressively files are hashed.                                  | `"balanced"` |
-| `skip_hardlinks`       | Skip files that have multiple hard links on both roots.                                                  | `false`      |
+| `hardlinks`            | `"copy"`, `"skip"`, or `"preserve"`. Copy does not explicitly preserve links (tar may still keep them). Skip removes any path in a hardlink group on either side. Preserve recreates hardlinks and errors if unsupported. | `"copy"`     |
 | `preserve_owner`       | Preserve file ownership during sync. Disable for filesystems that reject `chown`.                        | `true`       |
 | `preserve_permissions` | Preserve file permissions and mtimes. Disable on non-POSIX filesystems.                                  | `true`       |
 | `state_db_name`        | Optional label inside `.synchi/` for the state database. Synchi stores it as `<label>.db`. Use unique names per config if needed. | `state.db`   |
@@ -84,6 +84,19 @@ When force mode is active, conflicts are suppressed because one side always wins
 
 Without force, `synchi sync` prints the diff summary and then prompts separately for each category that still has work pending (`Copy A → B`, `Copy B → A`, `Delete on A`, `Delete on B`). Reply with `y`/`n`, type `dry` to list the pending paths before deciding, pre-approve via CLI (`--copy-a-to-b yes|no`, etc.), or pass `-y/--yes` to auto-approve all unanswered categories in one go.
 
+## Hardlink Handling
+
+Use `hardlinks` to control how hardlinked files are handled:
+
+* `copy` (default): Synchi copies file content like normal files. It does not explicitly preserve hardlink relationships (tar transfers may still keep them).
+* `skip`: Any path that belongs to a hardlink group on either root is skipped before diffing.
+* `preserve`: Synchi recreates hardlinks on the destination and fails if it cannot.
+
+Preserve mode requires:
+
+* Filesystem support for hardlinks on the destination.
+* Remote `find` with `%D`/`%i` support (inode/device IDs) when syncing over SSH.
+
 ## Ownership and Permissions
 
 Some filesystems do not support POSIX ownership or permissions (for example: SMB shares, NAS devices, Android storage).
@@ -103,6 +116,7 @@ Most options can be overridden via CLI flags, including:
 
 * `--root-a`, `--root-b`
 * `--state-db-name`
+* `--hardlinks`
 * `--hash-mode`
 * `--force`
 * `--dry-run`

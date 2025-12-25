@@ -1,6 +1,8 @@
 #[cfg(test)]
 mod tests {
     use crate::scan::filter::{Filter, ScanTargets};
+    use crate::scan::{hardlink_groups, Entry};
+    use crate::roots::EntryKind;
     use std::path::{Path, PathBuf};
 
     #[test]
@@ -43,5 +45,66 @@ mod tests {
     fn scan_targets_none_when_empty() {
         let f = Filter::new(&[], &[]).unwrap();
         assert!(matches!(f.scan_targets(), ScanTargets::None));
+    }
+
+    #[test]
+    fn hardlink_groups_collect_multiple_paths() {
+        let entries = vec![
+            Entry {
+                path: "a.txt".to_string(),
+                kind: EntryKind::File,
+                size: 1,
+                mtime: 0,
+                mode: 0o644,
+                nlink: 2,
+                dev: 1,
+                inode: 10,
+                hash: None,
+                link_target: None,
+            },
+            Entry {
+                path: "b.txt".to_string(),
+                kind: EntryKind::File,
+                size: 1,
+                mtime: 0,
+                mode: 0o644,
+                nlink: 2,
+                dev: 1,
+                inode: 10,
+                hash: None,
+                link_target: None,
+            },
+            Entry {
+                path: "c.txt".to_string(),
+                kind: EntryKind::File,
+                size: 1,
+                mtime: 0,
+                mode: 0o644,
+                nlink: 2,
+                dev: 1,
+                inode: 11,
+                hash: None,
+                link_target: None,
+            },
+            Entry {
+                path: "dir".to_string(),
+                kind: EntryKind::Dir,
+                size: 0,
+                mtime: 0,
+                mode: 0o755,
+                nlink: 2,
+                dev: 1,
+                inode: 12,
+                hash: None,
+                link_target: None,
+            },
+        ];
+
+        let groups = hardlink_groups(&entries);
+        assert_eq!(groups.len(), 1);
+        let group = groups.values().next().unwrap();
+        assert_eq!(group.len(), 2);
+        assert!(group.contains(&"a.txt".to_string()));
+        assert!(group.contains(&"b.txt".to_string()));
     }
 }

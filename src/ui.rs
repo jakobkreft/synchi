@@ -1,7 +1,7 @@
 use crate::diff::{DiffResult, SyncAction};
 use crate::plan::{CopyDirection, DeleteOp, DeleteSide, Plan};
 use crate::roots::EntryKind;
-use crate::state::Entry as StateEntry;
+use crate::scan::Entry as ScanEntry;
 use anyhow::Result;
 use crossterm::{
     event::{self, Event, KeyCode, KeyEventKind},
@@ -183,14 +183,14 @@ impl Ui {
             match choice {
                 SyncAction::CopyAtoB => {
                     if let Some(entry) = conflict.change_a.entry_now.clone() {
-                        plan.add_copy(CopyDirection::AtoB, entry);
+                        plan.add_copy(CopyDirection::AtoB, entry.to_state());
                     } else {
                         let kind = conflict
                             .change_b
                             .entry_now
                             .as_ref()
-                            .or(conflict.change_b.entry_prev.as_ref())
                             .map(|e| e.kind)
+                            .or_else(|| conflict.change_b.entry_prev.as_ref().map(|e| e.kind))
                             .unwrap_or(EntryKind::File);
                         plan.add_delete(
                             DeleteSide::RootB,
@@ -203,14 +203,14 @@ impl Ui {
                 }
                 SyncAction::CopyBtoA => {
                     if let Some(entry) = conflict.change_b.entry_now.clone() {
-                        plan.add_copy(CopyDirection::BtoA, entry);
+                        plan.add_copy(CopyDirection::BtoA, entry.to_state());
                     } else {
                         let kind = conflict
                             .change_a
                             .entry_now
                             .as_ref()
-                            .or(conflict.change_a.entry_prev.as_ref())
                             .map(|e| e.kind)
+                            .or_else(|| conflict.change_a.entry_prev.as_ref().map(|e| e.kind))
                             .unwrap_or(EntryKind::File);
                         plan.add_delete(
                             DeleteSide::RootA,
@@ -229,7 +229,7 @@ impl Ui {
     }
 }
 
-fn entry_summary(entry: Option<&StateEntry>) -> String {
+fn entry_summary(entry: Option<&ScanEntry>) -> String {
     match entry {
         Some(e) => {
             let hash_str = e

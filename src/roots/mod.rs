@@ -176,6 +176,7 @@ mod tests {
 #[derive(Debug, Clone, Default)]
 pub struct RemoteCaps {
     pub has_find_printf: bool,
+    pub has_find_inode: bool,
 }
 
 #[derive(Debug, Clone)]

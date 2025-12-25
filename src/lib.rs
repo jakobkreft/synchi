@@ -29,6 +29,7 @@ use output::Console;
 use roots::{Root, RootSpec};
 use transport::CopyBehavior;
 use crate::cli::Commands;
+use crate::scan::Entry as ScanEntry;
 
 pub fn run(cli: Cli) -> Result<()> {
     install_signal_handler();
@@ -68,6 +69,9 @@ pub fn run(cli: Cli) -> Result<()> {
     }
     if let Some(force_arg) = cli.force {
         config.force = force_arg.as_config_value();
+    }
+    if let Some(mode) = cli.hardlinks {
+        config.hardlinks = mode.into();
     }
     if let Some(name) = cli.state_db_name {
         config.state_db_name = Some(name);
@@ -170,6 +174,7 @@ pub fn run(cli: Cli) -> Result<()> {
                 tracing::warn!("Include patterns are empty; nothing will be scanned or synced.");
             }
             let filter = scan::Filter::new(include_patterns, ignore_patterns)?;
+            let hardlink_mode = config.hardlinks;
 
             let label_a = format!("Root A ({})", root_a.path().display());
             info!("Scanning {}", label_a);
@@ -187,6 +192,11 @@ pub fn run(cli: Cli) -> Result<()> {
                 let caps = ssh_root.probe_caps()?;
                 let label_b = format!("Root B ({})", ssh_root.path().display());
                 info!("Scanning {}", label_b);
+                if !matches!(hardlink_mode, config::HardlinkMode::Copy) && !caps.has_find_inode {
+                    anyhow::bail!(
+                        "Hardlink modes require remote `find` with %D/%i support"
+                    );
+                }
                 run_scan_with_progress(
                     &label_b,
                     Some(state_hint),
@@ -207,18 +217,33 @@ pub fn run(cli: Cli) -> Result<()> {
                     &console,
                 )?
             };
-            let hardlink_skip = if config.skip_hardlinks {
-                hardlink_skip_set(&scan_a, &scan_b)
+            if !matches!(hardlink_mode, config::HardlinkMode::Copy)
+                && (scan::has_missing_inode(&scan_a) || scan::has_missing_inode(&scan_b))
+            {
+                anyhow::bail!("Hardlink modes require inode/device IDs");
+            }
+            let _hardlink_groups_a = if matches!(hardlink_mode, config::HardlinkMode::Preserve) {
+                Some(scan::hardlink_groups(&scan_a))
+            } else {
+                None
+            };
+            let _hardlink_groups_b = if matches!(hardlink_mode, config::HardlinkMode::Preserve) {
+                Some(scan::hardlink_groups(&scan_b))
+            } else {
+                None
+            };
+            let hardlink_skip = if matches!(hardlink_mode, config::HardlinkMode::Skip) {
+                hardlink_skip_paths(&scan_a, &scan_b)
             } else {
                 HashSet::new()
             };
             if !hardlink_skip.is_empty() {
                 tracing::warn!(
-                    "Skipping {} hard-linked paths present on both roots.",
+                    "Skipping {} hard-linked paths (hardlinks=skip).",
                     hardlink_skip.len()
                 );
-                filter_entries(&mut scan_a, &hardlink_skip);
-                filter_entries(&mut scan_b, &hardlink_skip);
+                filter_scan_entries(&mut scan_a, &hardlink_skip);
+                filter_scan_entries(&mut scan_b, &hardlink_skip);
             }
             let scan_a_count = scan_a.len();
             let scan_b_count = scan_b.len();
@@ -243,8 +268,8 @@ pub fn run(cli: Cli) -> Result<()> {
             let mut state_a = state_entries.clone();
             let mut state_b = state_entries;
             if !hardlink_skip.is_empty() {
-                filter_entries(&mut state_a, &hardlink_skip);
-                filter_entries(&mut state_b, &hardlink_skip);
+                filter_state_entries(&mut state_a, &hardlink_skip);
+                filter_state_entries(&mut state_b, &hardlink_skip);
             }
 
             let mut diffs = diff::DiffEngine::diff(scan_a, state_a, scan_b, state_b, &filter);
@@ -326,6 +351,7 @@ pub fn run(cli: Cli) -> Result<()> {
                 tracing::warn!("Include patterns are empty; nothing will be scanned or synced.");
             }
             let filter = scan::Filter::new(include_patterns, ignore_patterns)?;
+            let hardlink_mode = config.hardlinks;
 
             let label_a = format!("Root A ({})", root_a.path().display());
             info!("Scanning {}", label_a);
@@ -343,6 +369,11 @@ pub fn run(cli: Cli) -> Result<()> {
                 let caps = ssh_root.probe_caps()?;
                 let label_b = format!("Root B ({})", ssh_root.path().display());
                 info!("Scanning {}", label_b);
+                if !matches!(hardlink_mode, config::HardlinkMode::Copy) && !caps.has_find_inode {
+                    anyhow::bail!(
+                        "Hardlink modes require remote `find` with %D/%i support"
+                    );
+                }
                 run_scan_with_progress(
                     &label_b,
                     Some(state_hint),
@@ -361,18 +392,33 @@ pub fn run(cli: Cli) -> Result<()> {
             } else {
                 anyhow::bail!("Unsupported root type for B");
             };
-            let hardlink_skip = if config.skip_hardlinks {
-                hardlink_skip_set(&scan_a, &scan_b)
+            if !matches!(hardlink_mode, config::HardlinkMode::Copy)
+                && (scan::has_missing_inode(&scan_a) || scan::has_missing_inode(&scan_b))
+            {
+                anyhow::bail!("Hardlink modes require inode/device IDs");
+            }
+            let hardlink_groups_a = if matches!(hardlink_mode, config::HardlinkMode::Preserve) {
+                Some(scan::hardlink_groups(&scan_a))
+            } else {
+                None
+            };
+            let hardlink_groups_b = if matches!(hardlink_mode, config::HardlinkMode::Preserve) {
+                Some(scan::hardlink_groups(&scan_b))
+            } else {
+                None
+            };
+            let hardlink_skip = if matches!(hardlink_mode, config::HardlinkMode::Skip) {
+                hardlink_skip_paths(&scan_a, &scan_b)
             } else {
                 HashSet::new()
             };
             if !hardlink_skip.is_empty() {
                 tracing::warn!(
-                    "Skipping {} hard-linked paths present on both roots.",
+                    "Skipping {} hard-linked paths (hardlinks=skip).",
                     hardlink_skip.len()
                 );
-                filter_entries(&mut scan_a, &hardlink_skip);
-                filter_entries(&mut scan_b, &hardlink_skip);
+                filter_scan_entries(&mut scan_a, &hardlink_skip);
+                filter_scan_entries(&mut scan_b, &hardlink_skip);
             }
             let scan_a_count = scan_a.len();
             let scan_b_count = scan_b.len();
@@ -386,7 +432,9 @@ pub fn run(cli: Cli) -> Result<()> {
                 &console,
             )?;
             if !*dry_run {
-                db.refresh_metadata(&scan_a)?;
+                let scan_a_state: Vec<state::Entry> =
+                    scan_a.iter().map(ScanEntry::to_state).collect();
+                db.refresh_metadata(&scan_a_state)?;
             }
             hash_with_logging(
                 "Root B",
@@ -402,11 +450,28 @@ pub fn run(cli: Cli) -> Result<()> {
             let mut state_a = state_entries.clone();
             let mut state_b = state_entries;
             if !hardlink_skip.is_empty() {
-                filter_entries(&mut state_a, &hardlink_skip);
-                filter_entries(&mut state_b, &hardlink_skip);
+                filter_state_entries(&mut state_a, &hardlink_skip);
+                filter_state_entries(&mut state_b, &hardlink_skip);
             }
 
+            let preserve_mode = matches!(hardlink_mode, config::HardlinkMode::Preserve);
+            let scan_a_for_links = if preserve_mode {
+                Some(scan_a.clone())
+            } else {
+                None
+            };
+            let scan_b_for_links = if preserve_mode {
+                Some(scan_b.clone())
+            } else {
+                None
+            };
+
             let mut diffs = diff::DiffEngine::diff(scan_a, state_a, scan_b, state_b, &filter);
+            let diffs_for_links = if preserve_mode {
+                Some(diffs.clone())
+            } else {
+                None
+            };
 
             if let Some(force_side) = config.force_side()? {
                 match force_side {
@@ -491,6 +556,23 @@ pub fn run(cli: Cli) -> Result<()> {
             )?;
             if !allow_delete_on_b {
                 plan.delete_b.clear();
+            }
+
+            if preserve_mode {
+                if let (Some(groups_a), Some(groups_b)) =
+                    (hardlink_groups_a.as_ref(), hardlink_groups_b.as_ref())
+                {
+                    plan::apply_hardlink_preserve(
+                        &mut plan,
+                        diffs_for_links.as_ref().unwrap(),
+                        groups_a,
+                        groups_b,
+                        scan_a_for_links.as_ref().unwrap(),
+                        scan_b_for_links.as_ref().unwrap(),
+                        allow_copy_a_to_b,
+                        allow_copy_b_to_a,
+                    );
+                }
             }
 
             let total_ops = plan.total_operations();
@@ -590,7 +672,7 @@ fn print_effective_config(
         _ => "none (default)",
     };
     console.out(&format!("Force mode: {}", force_display))?;
-    console.out(&format!("Skip hardlinks: {}", config.skip_hardlinks))?;
+    console.out(&format!("Hardlink mode: {:?}", config.hardlinks))?;
     console.out(&format!("Hash mode: {:?}", config.hash_mode))?;
     console.out(&format!("Preserve owner: {}", config.preserve_owner))?;
     console.out(&format!(
@@ -623,9 +705,9 @@ fn run_scan_with_progress<F>(
     expected: Option<u64>,
     runner: F,
     console: &Console,
-) -> Result<Vec<state::Entry>>
+) -> Result<Vec<ScanEntry>>
 where
-    F: FnOnce(&ProgressBar) -> Result<Vec<state::Entry>>,
+    F: FnOnce(&ProgressBar) -> Result<Vec<ScanEntry>>,
 {
     let pb = start_scan_progress(label, expected, console);
     let result = runner(&pb);
@@ -862,7 +944,7 @@ fn prompt_category(
 fn hash_with_logging(
     label: &str,
     root: &dyn roots::Root,
-    entries: &mut [state::Entry],
+    entries: &mut [ScanEntry],
     state_map: &HashMap<String, state::Entry>,
     mode: config::HashMode,
     console: &Console,
@@ -882,7 +964,7 @@ fn hash_with_logging(
 #[cfg_attr(not(test), allow(dead_code))]
 fn prepare_hashes(
     root: &dyn roots::Root,
-    entries: &mut [state::Entry],
+    entries: &mut [ScanEntry],
     state_map: &HashMap<String, state::Entry>,
     mode: config::HashMode,
 ) -> Result<usize> {
@@ -891,7 +973,7 @@ fn prepare_hashes(
 
 fn prepare_hashes_with_progress(
     root: &dyn roots::Root,
-    entries: &mut [state::Entry],
+    entries: &mut [ScanEntry],
     state_map: &HashMap<String, state::Entry>,
     mode: config::HashMode,
     progress: Option<&ProgressBar>,
@@ -938,7 +1020,7 @@ fn prepare_hashes_with_progress(
 
 fn hash_batch(
     root: &dyn roots::Root,
-    entries: &mut [state::Entry],
+    entries: &mut [ScanEntry],
     batch: &[(usize, std::path::PathBuf)],
 ) -> Result<()> {
     if batch.is_empty() {
@@ -953,34 +1035,30 @@ fn hash_batch(
     Ok(())
 }
 
-fn hardlink_skip_set(
-    scan_a: &[state::Entry],
-    scan_b: &[state::Entry],
-) -> HashSet<String> {
-    use crate::roots::EntryKind;
-    let hardlinks_a: HashSet<String> = scan_a
-        .iter()
-        .filter(|e| e.kind == EntryKind::File && e.nlink > 1)
-        .map(|e| e.path.clone())
-        .collect();
-    if hardlinks_a.is_empty() {
-        return HashSet::new();
-    }
-    let hardlinks_b: HashSet<String> = scan_b
-        .iter()
-        .filter(|e| e.kind == EntryKind::File && e.nlink > 1)
-        .map(|e| e.path.clone())
-        .collect();
-    if hardlinks_b.is_empty() {
-        return HashSet::new();
-    }
-    hardlinks_a
-        .intersection(&hardlinks_b)
-        .cloned()
-        .collect()
+fn hardlink_skip_paths(scan_a: &[ScanEntry], scan_b: &[ScanEntry]) -> HashSet<String> {
+    let mut skip = hardlink_group_paths(scan_a);
+    skip.extend(hardlink_group_paths(scan_b));
+    skip
 }
 
-fn filter_entries(entries: &mut Vec<state::Entry>, skip: &HashSet<String>) {
+fn hardlink_group_paths(entries: &[ScanEntry]) -> HashSet<String> {
+    let mut skip = HashSet::new();
+    for paths in scan::hardlink_groups(entries).values() {
+        for path in paths {
+            skip.insert(path.clone());
+        }
+    }
+    skip
+}
+
+fn filter_scan_entries(entries: &mut Vec<ScanEntry>, skip: &HashSet<String>) {
+    if skip.is_empty() {
+        return;
+    }
+    entries.retain(|entry| !skip.contains(&entry.path));
+}
+
+fn filter_state_entries(entries: &mut Vec<state::Entry>, skip: &HashSet<String>) {
     if skip.is_empty() {
         return;
     }
@@ -992,43 +1070,38 @@ mod hardlink_skip_tests {
     use super::*;
     use crate::roots::EntryKind;
 
-    fn make_entry(path: &str, kind: EntryKind, nlink: u64) -> state::Entry {
-        state::Entry {
+    fn make_entry(path: &str, kind: EntryKind, nlink: u64, dev: u64, inode: u64) -> ScanEntry {
+        ScanEntry {
             path: path.to_string(),
             kind,
             size: 0,
             mtime: 0,
             mode: 0o644,
             nlink,
+            dev,
+            inode,
             hash: None,
             link_target: None,
-            deleted: false,
         }
     }
 
     #[test]
-    fn hardlink_skip_requires_both_sides() {
-        let scan_a = vec![make_entry("file.txt", EntryKind::File, 2)];
-        let scan_b = vec![make_entry("file.txt", EntryKind::File, 1)];
-        let skip = hardlink_skip_set(&scan_a, &scan_b);
-        assert!(skip.is_empty());
-    }
-
-    #[test]
-    fn hardlink_skip_only_targets_files() {
-        let scan_a = vec![make_entry("dir", EntryKind::Dir, 2)];
-        let scan_b = vec![make_entry("dir", EntryKind::Dir, 2)];
-        let skip = hardlink_skip_set(&scan_a, &scan_b);
-        assert!(skip.is_empty());
-    }
-
-    #[test]
-    fn hardlink_skip_intersects_paths() {
-        let scan_a = vec![make_entry("file.txt", EntryKind::File, 2)];
-        let scan_b = vec![make_entry("file.txt", EntryKind::File, 3)];
-        let skip = hardlink_skip_set(&scan_a, &scan_b);
-        assert!(skip.contains("file.txt"));
-        assert_eq!(skip.len(), 1);
+    fn hardlink_skip_unions_both_sides() {
+        let scan_a = vec![
+            make_entry("file_a1.txt", EntryKind::File, 2, 1, 10),
+            make_entry("file_a2.txt", EntryKind::File, 2, 1, 10),
+            make_entry("dir", EntryKind::Dir, 2, 2, 20),
+        ];
+        let scan_b = vec![
+            make_entry("file_b1.txt", EntryKind::File, 3, 3, 30),
+            make_entry("file_b2.txt", EntryKind::File, 3, 3, 30),
+        ];
+        let skip = hardlink_skip_paths(&scan_a, &scan_b);
+        assert!(skip.contains("file_a1.txt"));
+        assert!(skip.contains("file_a2.txt"));
+        assert!(skip.contains("file_b1.txt"));
+        assert!(skip.contains("file_b2.txt"));
+        assert!(!skip.contains("dir"));
     }
 }
 
@@ -1040,7 +1113,7 @@ mod hash_mode_tests {
     use std::os::unix::fs::{MetadataExt, PermissionsExt};
     use tempfile::tempdir;
 
-    fn entry_from_fs(path: &std::path::Path, rel: &str) -> state::Entry {
+    fn entry_from_fs(path: &std::path::Path, rel: &str) -> ScanEntry {
         let meta = std::fs::symlink_metadata(path).unwrap();
         let mtime = meta
             .modified()
@@ -1048,16 +1121,17 @@ mod hash_mode_tests {
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap()
             .as_secs() as i64;
-        state::Entry {
+        ScanEntry {
             path: rel.to_string(),
             kind: roots::EntryKind::File,
             size: meta.len(),
             mtime,
             mode: meta.permissions().mode(),
             nlink: meta.nlink(),
+            dev: meta.dev(),
+            inode: meta.ino(),
             hash: None,
             link_target: None,
-            deleted: false,
         }
     }
 
@@ -1075,7 +1149,7 @@ mod hash_mode_tests {
 
         let mut entries = vec![entry.clone()];
         let mut state_map = HashMap::new();
-        state_map.insert(entry.path.clone(), prev);
+        state_map.insert(entry.path.clone(), prev.to_state());
 
         let hashed = prepare_hashes(&root, &mut entries, &state_map, config::HashMode::Balanced)?;
         assert_eq!(hashed, 1);
@@ -1095,7 +1169,7 @@ mod hash_mode_tests {
         let mut state_map = HashMap::new();
         let mut prev = entry.clone();
         prev.hash = Some(vec![0xca, 0xfe]);
-        state_map.insert(entry.path.clone(), prev.clone());
+        state_map.insert(entry.path.clone(), prev.to_state());
 
         let hashed = prepare_hashes(&root, &mut entries, &state_map, config::HashMode::Balanced)?;
         assert_eq!(hashed, 0);

@@ -1,8 +1,8 @@
 use super::filter::ScanTargets;
 use super::Filter;
 use crate::roots::{EntryKind, RemoteCaps, Root, SshRoot};
+use crate::scan::Entry;
 use crate::shell::shell_quote;
-use crate::state::Entry;
 use anyhow::{bail, Result};
 use indicatif::ProgressBar;
 use std::path::Path;
@@ -62,11 +62,17 @@ impl<'a> RemoteScanner<'a> {
         targets: ScanTargets,
         progress: Option<&ProgressBar>,
     ) -> Result<Vec<Entry>> {
-        const PRINTF_FMT: &str = "'%p\\0%y\\0%s\\0%n\\0%T@\\0%m\\0%l\\0'";
+        const PRINTF_FMT_BASIC: &str = "'%p\\0%y\\0%s\\0%n\\0%T@\\0%m\\0%l\\0'";
+        const PRINTF_FMT_INODE: &str = "'%p\\0%y\\0%s\\0%n\\0%T@\\0%m\\0%l\\0%D\\0%i\\0'";
+        let printf_fmt = if self.caps.has_find_inode {
+            PRINTF_FMT_INODE
+        } else {
+            PRINTF_FMT_BASIC
+        };
         let root_str = self.root.path().to_string_lossy();
         let root_q = shell_quote(root_str.as_ref());
         let find_cmd = match targets {
-            ScanTargets::All => format!("find . -printf {PRINTF_FMT}"),
+            ScanTargets::All => format!("find . -printf {printf_fmt}"),
             ScanTargets::Limited(prefixes) => {
                 if prefixes.is_empty() {
                     "true".to_string()
@@ -79,7 +85,7 @@ impl<'a> RemoteScanner<'a> {
                         segments.push(format!(
                             "if [ -e {path} ] || [ -L {path} ]; then find {path} -printf {printf}; else true; fi",
                             path = quoted,
-                            printf = PRINTF_FMT
+                            printf = printf_fmt
                         ));
                     }
                     segments.join("; ")
@@ -106,8 +112,9 @@ impl<'a> RemoteScanner<'a> {
             &parts[..]
         };
 
-        for chunk in parts.chunks(7) {
-            if chunk.len() < 7 {
+        let fields = if self.caps.has_find_inode { 9 } else { 7 };
+        for chunk in parts.chunks(fields) {
+            if chunk.len() < fields {
                 break;
             }
 
@@ -118,6 +125,15 @@ impl<'a> RemoteScanner<'a> {
             let mtime_bytes = chunk[4];
             let mode_bytes = chunk[5];
             let link_bytes = chunk[6];
+            let (dev, inode) = if self.caps.has_find_inode {
+                let dev_bytes = chunk[7];
+                let inode_bytes = chunk[8];
+                let dev = String::from_utf8_lossy(dev_bytes).parse().unwrap_or(0);
+                let inode = String::from_utf8_lossy(inode_bytes).parse().unwrap_or(0);
+                (dev, inode)
+            } else {
+                (0, 0)
+            };
 
             let path_str = String::from_utf8_lossy(path_bytes).to_string();
             let rel_path_str = path_str.strip_prefix("./").unwrap_or(&path_str).to_string();
@@ -169,9 +185,10 @@ impl<'a> RemoteScanner<'a> {
                 mtime,
                 mode,
                 nlink,
+                dev,
+                inode,
                 hash: None,
                 link_target,
-                deleted: false,
             });
 
             if let Some(pb) = progress {

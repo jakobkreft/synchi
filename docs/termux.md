@@ -39,7 +39,7 @@ ignore = ["**/cache/**"]
 hash_mode = "balanced"
 force = "none"
 
-skip_hardlinks = true
+hardlinks = "copy"
 preserve_owner = false
 preserve_permissions = false
 ```

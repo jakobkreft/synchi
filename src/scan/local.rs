@@ -1,7 +1,6 @@
 use crate::roots::{EntryKind, LocalRoot, Root};
 use crate::scan::filter::ScanTargets;
-use crate::scan::Filter;
-use crate::state::Entry;
+use crate::scan::{Entry, Filter};
 use anyhow::Result;
 use indicatif::ProgressBar;
 use std::collections::HashSet;
@@ -113,6 +112,8 @@ impl<'a> LocalScanner<'a> {
                 .as_secs() as i64;
             let mode = meta.permissions().mode();
             let nlink = meta.nlink();
+            let dev = meta.dev();
+            let inode = meta.ino();
 
             let link_target = if kind == EntryKind::Symlink {
                 let target = fs::read_link(path)?.to_string_lossy().to_string();
@@ -134,9 +135,10 @@ impl<'a> LocalScanner<'a> {
                 mtime,
                 mode,
                 nlink,
+                dev,
+                inode,
                 hash: None,
                 link_target,
-                deleted: false,
             });
 
             if let Some(pb) = progress {

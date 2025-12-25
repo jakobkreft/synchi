@@ -1,6 +1,6 @@
 use crate::plan::{CopyDirection, DeleteOp, DeleteSide, Plan};
 use crate::roots::EntryKind;
-use anyhow::Result;
+use anyhow::{Context, Result};
 use rusqlite::{params, params_from_iter, Connection, OptionalExtension};
 use std::path::Path;
 
@@ -11,7 +11,6 @@ pub struct Entry {
     pub size: u64,
     pub mtime: i64,
     pub mode: u32,
-    pub nlink: u64,
     pub hash: Option<Vec<u8>>,
     pub link_target: Option<String>,
     pub deleted: bool,
@@ -32,6 +31,13 @@ pub struct PendingDelete {
     pub id: i64,
     pub path: String,
     pub kind: EntryKind,
+}
+
+#[derive(Debug, Clone)]
+pub struct PendingLink {
+    pub id: i64,
+    pub path: String,
+    pub target: String,
 }
 
 #[derive(Debug, Clone, Copy, Default)]
@@ -79,6 +85,17 @@ impl StateDb {
             .conn
             .prepare("SELECT COUNT(*) FROM pending_delete_ops WHERE side = ?1")?;
         let count = stmt.query_row(params![delete_side_to_int(side)], |row| {
+            let val: i64 = row.get(0)?;
+            Ok(val as usize)
+        })?;
+        Ok(count)
+    }
+
+    pub fn pending_link_count(&self, direction: CopyDirection) -> Result<usize> {
+        let mut stmt = self
+            .conn
+            .prepare("SELECT COUNT(*) FROM pending_link_ops WHERE direction = ?1")?;
+        let count = stmt.query_row(params![copy_direction_to_int(direction)], |row| {
             let val: i64 = row.get(0)?;
             Ok(val as usize)
         })?;
@@ -146,6 +163,16 @@ impl StateDb {
             [],
         )?;
 
+        self.conn.execute(
+            "CREATE TABLE IF NOT EXISTS pending_link_ops (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                direction INTEGER NOT NULL,
+                path TEXT NOT NULL,
+                target TEXT NOT NULL
+            )",
+            [],
+        )?;
+
         Ok(())
     }
 
@@ -187,7 +214,6 @@ impl StateDb {
                     size: row.get(2)?,
                     mtime: row.get(3)?,
                     mode: row.get(4)?,
-                    nlink: 1,
                     hash: row.get(5)?,
                     link_target: row.get(6)?,
                     deleted: row.get::<_, i32>(7)? != 0,
@@ -248,7 +274,6 @@ impl StateDb {
                 size: row.get(2)?,
                 mtime: row.get(3)?,
                 mode: row.get(4)?,
-                nlink: 1,
                 hash: row.get(5)?,
                 link_target: row.get(6)?,
                 deleted: row.get::<_, i32>(7)? != 0,
@@ -267,6 +292,7 @@ impl StateDb {
         let result: Result<()> = (|| {
             self.conn.execute("DELETE FROM pending_copy_ops", [])?;
             self.conn.execute("DELETE FROM pending_delete_ops", [])?;
+            self.conn.execute("DELETE FROM pending_link_ops", [])?;
 
             for entry in &plan.copy_a_to_b {
                 self.insert_pending_copy(CopyDirection::AtoB, entry)?;
@@ -279,6 +305,12 @@ impl StateDb {
             }
             for del in &plan.delete_b {
                 self.insert_pending_delete(DeleteSide::RootB, del)?;
+            }
+            for link in &plan.hardlink_a_to_b {
+                self.insert_pending_link(CopyDirection::AtoB, link)?;
+            }
+            for link in &plan.hardlink_b_to_a {
+                self.insert_pending_link(CopyDirection::BtoA, link)?;
             }
             Ok(())
         })();
@@ -301,6 +333,10 @@ impl StateDb {
 
     fn insert_pending_delete(&self, side: DeleteSide, op: &DeleteOp) -> Result<()> {
         insert_pending_delete_conn(&self.conn, side, op)
+    }
+
+    fn insert_pending_link(&self, direction: CopyDirection, link: &crate::plan::LinkOp) -> Result<()> {
+        insert_pending_link_conn(&self.conn, direction, link)
     }
 
     pub fn refresh_metadata(&self, entries: &[Entry]) -> Result<()> {
@@ -364,7 +400,6 @@ impl StateDb {
                         size: row.get(3)?,
                         mtime: row.get(4)?,
                         mode: row.get(5)?,
-                        nlink: 1,
                         hash: row.get(6)?,
                         link_target: row.get(7)?,
                         deleted: false,
@@ -410,6 +445,35 @@ impl StateDb {
             deletes.push(r?);
         }
         Ok(deletes)
+    }
+
+    pub fn fetch_pending_links(
+        &self,
+        direction: CopyDirection,
+        limit: usize,
+    ) -> Result<Vec<PendingLink>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT id, path, target FROM pending_link_ops
+             WHERE direction = ?1
+             ORDER BY id
+             LIMIT ?2",
+        )?;
+        let rows = stmt.query_map(
+            params![copy_direction_to_int(direction), limit as i64],
+            |row| {
+                Ok(PendingLink {
+                    id: row.get(0)?,
+                    path: row.get(1)?,
+                    target: row.get(2)?,
+                })
+            },
+        )?;
+
+        let mut links = Vec::new();
+        for r in rows {
+            links.push(r?);
+        }
+        Ok(links)
     }
 
     pub fn complete_pending_copies(&self, copies: &[PendingCopy]) -> Result<()> {
@@ -458,11 +522,45 @@ impl StateDb {
         }
         Ok(())
     }
+
+    pub fn complete_pending_links(&self, links: &[PendingLink]) -> Result<()> {
+        if links.is_empty() {
+            return Ok(());
+        }
+        self.conn.execute("BEGIN TRANSACTION", [])?;
+        let result: Result<()> = (|| {
+            for link in links {
+                if link.path == link.target {
+                    continue;
+                }
+                let mut entry = self
+                    .get_entry(&link.target)?
+                    .with_context(|| format!("Link target missing in state: {}", link.target))?;
+                if entry.deleted {
+                    anyhow::bail!("Link target marked deleted in state: {}", link.target);
+                }
+                entry.path = link.path.clone();
+                entry.deleted = false;
+                self.upsert_entry(&entry)?;
+            }
+            delete_by_ids(&self.conn, "pending_link_ops", links.iter().map(|l| l.id))?;
+            Ok(())
+        })();
+
+        if let Err(err) = result {
+            let _ = self.conn.execute("ROLLBACK", []);
+            return Err(err);
+        }
+
+        self.conn.execute("COMMIT", [])?;
+        Ok(())
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::plan::LinkOp;
 
     #[test]
     fn test_db_operations() -> Result<()> {
@@ -480,7 +578,6 @@ mod tests {
             size: 100,
             mtime: 123456789,
             mode: 0o644,
-            nlink: 1,
             hash: Some(vec![0, 1, 2, 3]),
             link_target: None,
             deleted: false,
@@ -512,6 +609,40 @@ mod tests {
         assert_eq!(updated.mtime, refreshed.mtime);
         assert_eq!(updated.mode, refreshed.mode);
 
+        Ok(())
+    }
+
+    #[test]
+    fn link_ops_clone_target_entry() -> Result<()> {
+        let db = StateDb::open_memory()?;
+        let entry = Entry {
+            path: "target.txt".to_string(),
+            kind: EntryKind::File,
+            size: 42,
+            mtime: 123,
+            mode: 0o644,
+            hash: None,
+            link_target: None,
+            deleted: false,
+        };
+        db.upsert_entry(&entry)?;
+
+        let mut plan = Plan::default();
+        plan.hardlink_a_to_b.push(LinkOp {
+            path: "linked.txt".to_string(),
+            target: "target.txt".to_string(),
+        });
+        db.queue_plan(&plan)?;
+
+        let pending = db.fetch_pending_links(CopyDirection::AtoB, 10)?;
+        assert_eq!(pending.len(), 1);
+        db.complete_pending_links(&pending)?;
+
+        let linked = db.get_entry("linked.txt")?.expect("linked entry");
+        assert_eq!(linked.kind, EntryKind::File);
+        assert_eq!(linked.size, 42);
+        assert_eq!(linked.mtime, 123);
+        assert_eq!(linked.mode, 0o644);
         Ok(())
     }
 }
@@ -547,6 +678,18 @@ fn insert_pending_delete_conn(conn: &Connection, side: DeleteSide, op: &DeleteOp
     conn.execute(
         "INSERT INTO pending_delete_ops (side, path, kind) VALUES (?1, ?2, ?3)",
         params![delete_side_to_int(side), op.path, kind_to_int(op.kind)],
+    )?;
+    Ok(())
+}
+
+fn insert_pending_link_conn(
+    conn: &Connection,
+    direction: CopyDirection,
+    link: &crate::plan::LinkOp,
+) -> Result<()> {
+    conn.execute(
+        "INSERT INTO pending_link_ops (direction, path, target) VALUES (?1, ?2, ?3)",
+        params![copy_direction_to_int(direction), link.path, link.target],
     )?;
     Ok(())
 }

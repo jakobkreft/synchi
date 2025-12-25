@@ -29,6 +29,10 @@ pub struct Cli {
     #[arg(long, value_enum)]
     pub force: Option<ForceArg>,
 
+    /// Hardlink handling mode (copy, skip, preserve)
+    #[arg(long, value_enum)]
+    pub hardlinks: Option<HardlinkModeArg>,
+
     #[command(subcommand)]
     pub command: Commands,
 }
@@ -72,6 +76,23 @@ impl From<HashModeArg> for config::HashMode {
         match value {
             HashModeArg::Balanced => config::HashMode::Balanced,
             HashModeArg::Always => config::HashMode::Always,
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, ValueEnum)]
+pub enum HardlinkModeArg {
+    Copy,
+    Skip,
+    Preserve,
+}
+
+impl From<HardlinkModeArg> for config::HardlinkMode {
+    fn from(value: HardlinkModeArg) -> Self {
+        match value {
+            HardlinkModeArg::Copy => config::HardlinkMode::Copy,
+            HardlinkModeArg::Skip => config::HardlinkMode::Skip,
+            HardlinkModeArg::Preserve => config::HardlinkMode::Preserve,
         }
     }
 }

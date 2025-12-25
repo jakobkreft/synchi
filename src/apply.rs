@@ -3,7 +3,7 @@ use crate::plan::{CopyDirection, DeleteSide};
 use crate::output::Console;
 use crate::roots::{EntryKind, Root, RootType, SshRoot};
 use crate::shell::{shell_quote, shell_quote_path};
-use crate::state::{CopyMetrics, PendingCopy, PendingDelete, StateDb};
+use crate::state::{CopyMetrics, PendingCopy, PendingDelete, PendingLink, StateDb};
 use crate::transport::{CopyBehavior, CopyStream, Transport};
 use anyhow::{bail, Context, Result};
 use indicatif::ProgressBar;
@@ -15,9 +15,9 @@ use std::sync::{
 };
 use std::thread;
 use std::time::{Duration, Instant};
-use tracing::debug;
 
 const COPY_CHUNK: usize = 512;
+const LINK_CHUNK: usize = 256;
 const DELETE_CHUNK: usize = 256;
 
 pub struct Executor<'a> {
@@ -25,6 +25,7 @@ pub struct Executor<'a> {
     root_b: &'a dyn Root,
     db: &'a StateDb,
     copy_chunk: usize,
+    link_chunk: usize,
     delete_chunk: usize,
     behavior: CopyBehavior,
     console: &'a Console,
@@ -43,6 +44,7 @@ impl<'a> Executor<'a> {
             root_b,
             db,
             copy_chunk: COPY_CHUNK,
+            link_chunk: LINK_CHUNK,
             delete_chunk: DELETE_CHUNK,
             behavior,
             console,
@@ -61,6 +63,14 @@ impl<'a> Executor<'a> {
             &mut stats,
         )?;
 
+        let links_ab = self.db.pending_link_count(CopyDirection::AtoB)?;
+        self.process_links(
+            CopyDirection::AtoB,
+            "Link A → B",
+            links_ab,
+            journal,
+        )?;
+
         let metrics_ba = self.db.copy_metrics(CopyDirection::BtoA)?;
         self.process_copy_direction(
             CopyDirection::BtoA,
@@ -68,6 +78,14 @@ impl<'a> Executor<'a> {
             metrics_ba,
             journal,
             &mut stats,
+        )?;
+
+        let links_ba = self.db.pending_link_count(CopyDirection::BtoA)?;
+        self.process_links(
+            CopyDirection::BtoA,
+            "Link B → A",
+            links_ba,
+            journal,
         )?;
 
         let delete_a = self.db.pending_delete_count(DeleteSide::RootA)?;
@@ -112,43 +130,40 @@ impl<'a> Executor<'a> {
         let pb = self.create_progress_bar(total_work, label);
         let mut bytes_done = 0u64;
         let mut entries_done = 0usize;
-        let mut stream: Option<CopyStream> = None;
         let mut chunk_records: Vec<(Operation, OpResult)> = Vec::new();
         let nonbyte_progress = Arc::new(AtomicU64::new(0));
         let mut monitor = MonitorGuard::new();
         let mut pending_commits: Vec<PendingCopy> = Vec::new();
         let mut deferred_ops: Vec<Operation> = Vec::new();
-        let mut streaming = false;
+        let mut stream = Transport::persistent_stream(src_root, dest_root, self.behavior)
+            .context("initializing transfer stream")?;
+        let streaming = stream.is_streaming();
+        if streaming && !monitor.is_active() {
+            if let Some(counter) = stream.progress_counter() {
+                monitor.activate(ProgressMonitor::start(
+                    pb.clone(),
+                    total_work,
+                    metrics.file_bytes,
+                    label.to_string(),
+                    counter,
+                    nonbyte_progress.clone(),
+                ));
+            }
+        }
 
         loop {
-            let chunk = self.db.fetch_pending_copies(direction, self.copy_chunk)?;
+            let limit = if streaming {
+                metrics.entries.max(1)
+            } else {
+                self.copy_chunk
+            };
+            let chunk = self.db.fetch_pending_copies(direction, limit)?;
             if chunk.is_empty() {
                 break;
             }
 
-            if stream.is_none() {
-                debug!("Starting persistent stream for {:?}", direction);
-                stream = Some(
-                    Transport::persistent_stream(src_root, dest_root, self.behavior)
-                        .context("initializing transfer stream")?,
-                );
-                streaming = stream.as_ref().map(|s| s.is_streaming()).unwrap_or(false);
-                if !monitor.is_active() {
-                    if let Some(counter) = stream.as_ref().unwrap().progress_counter() {
-                        monitor.activate(ProgressMonitor::start(
-                            pb.clone(),
-                            total_work,
-                            metrics.file_bytes,
-                            label.to_string(),
-                            counter,
-                            nonbyte_progress.clone(),
-                        ));
-                    }
-                }
-            }
-
             let progress = self.send_copy_chunk(
-                stream.as_mut().unwrap(),
+                &mut stream,
                 direction,
                 &chunk,
                 stats,
@@ -200,6 +215,7 @@ impl<'a> Executor<'a> {
 
             if streaming {
                 pending_commits.extend(chunk.into_iter());
+                break;
             } else {
                 self.db
                     .complete_pending_copies(&chunk)
@@ -207,35 +223,33 @@ impl<'a> Executor<'a> {
             }
         }
 
-        if let Some(stream) = stream {
-            if streaming {
-                if let Err(err) = stream
-                    .finish()
-                    .context("finalizing streaming copy session")
-                {
-                    record_stream_finish_failures(journal, &mut deferred_ops, &err);
-                    return Err(err);
-                }
-                if !pending_commits.is_empty() {
-                    for batch in pending_commits.chunks(self.copy_chunk) {
-                        if let Err(err) = self
-                            .db
-                            .complete_pending_copies(batch)
-                            .context("committing copy results to state DB")
-                        {
-                            record_stream_finish_failures(journal, &mut deferred_ops, &err);
-                            return Err(err);
-                        }
+        if streaming {
+            if let Err(err) = stream
+                .finish()
+                .context("finalizing streaming copy session")
+            {
+                record_stream_finish_failures(journal, &mut deferred_ops, &err);
+                return Err(err);
+            }
+            if !pending_commits.is_empty() {
+                for batch in pending_commits.chunks(self.copy_chunk) {
+                    if let Err(err) = self
+                        .db
+                        .complete_pending_copies(batch)
+                        .context("committing copy results to state DB")
+                    {
+                        record_stream_finish_failures(journal, &mut deferred_ops, &err);
+                        return Err(err);
                     }
                 }
-                for op in deferred_ops.drain(..) {
-                    journal.record(op, OpResult::Success);
-                }
-            } else {
-                stream
-                    .finish()
-                    .context("finalizing streaming copy session")?;
             }
+            for op in deferred_ops.drain(..) {
+                journal.record(op, OpResult::Success);
+            }
+        } else {
+            stream
+                .finish()
+                .context("finalizing streaming copy session")?;
         }
 
         monitor.stop();
@@ -358,6 +372,76 @@ impl<'a> Executor<'a> {
         Ok(())
     }
 
+    fn process_links(
+        &self,
+        direction: CopyDirection,
+        label: &str,
+        total_entries: usize,
+        journal: &mut Journal,
+    ) -> Result<()> {
+        if total_entries == 0 {
+            return Ok(());
+        }
+        let pb = self.create_progress_bar(total_entries as u64, label);
+        let mut completed = 0usize;
+        loop {
+            let chunk = self.db.fetch_pending_links(direction, self.link_chunk)?;
+            if chunk.is_empty() {
+                break;
+            }
+
+            let root = match direction {
+                CopyDirection::AtoB => self.root_b,
+                CopyDirection::BtoA => self.root_a,
+            };
+
+            if let Err(err) = self.validate_link_targets(&chunk) {
+                for link in &chunk {
+                    record_link_failure(link, direction, &err, journal);
+                }
+                return Err(err);
+            }
+
+            if let Err(err) = self.link_chunk(root, &chunk) {
+                for link in &chunk {
+                    record_link_failure(link, direction, &err, journal);
+                }
+                return Err(err);
+            }
+
+            for link in &chunk {
+                record_link_success(link, direction, journal);
+            }
+            completed += chunk.len();
+            pb.inc(chunk.len() as u64);
+            pb.set_message(format!("{} {}/{}", label, completed, total_entries));
+
+            self.db
+                .complete_pending_links(&chunk)
+                .context("updating link state")?;
+        }
+
+        pb.finish_with_message(format!("{} complete", label));
+        Ok(())
+    }
+
+    fn validate_link_targets(&self, links: &[PendingLink]) -> Result<()> {
+        for link in links {
+            if link.path == link.target {
+                continue;
+            }
+            let entry = self.db.get_entry(&link.target)?;
+            let entry = match entry {
+                Some(entry) => entry,
+                None => bail!("Hardlink target missing in state: {}", link.target),
+            };
+            if entry.deleted {
+                bail!("Hardlink target marked deleted in state: {}", link.target);
+            }
+        }
+        Ok(())
+    }
+
     fn delete_chunk(&self, root: &dyn Root, deletes: &[PendingDelete]) -> Result<()> {
         if deletes.is_empty() {
             return Ok(());
@@ -379,6 +463,28 @@ impl<'a> Executor<'a> {
                     .downcast_ref::<SshRoot>()
                     .context("invalid SSH root handle")?;
                 run_remote_delete(ssh, deletes)
+            }
+        }
+    }
+
+    fn link_chunk(&self, root: &dyn Root, links: &[PendingLink]) -> Result<()> {
+        if links.is_empty() {
+            return Ok(());
+        }
+        match root.kind() {
+            RootType::Local => {
+                let local = root
+                    .as_any()
+                    .downcast_ref::<crate::roots::LocalRoot>()
+                    .context("invalid local root handle")?;
+                run_local_links(local, links)
+            }
+            RootType::Ssh => {
+                let ssh = root
+                    .as_any()
+                    .downcast_ref::<SshRoot>()
+                    .context("invalid SSH root handle")?;
+                run_remote_links(ssh, links)
             }
         }
     }
@@ -406,6 +512,25 @@ fn record_delete_success(
     );
 }
 
+fn record_link_success(link: &PendingLink, direction: CopyDirection, journal: &mut Journal) {
+    journal.record(
+        Operation::new(&link.path, link_label(direction), "Linked entry"),
+        OpResult::Success,
+    );
+}
+
+fn record_link_failure(
+    link: &PendingLink,
+    direction: CopyDirection,
+    err: &anyhow::Error,
+    journal: &mut Journal,
+) {
+    journal.record(
+        Operation::new(&link.path, link_label(direction), "Failed to link"),
+        OpResult::Failed(format!("{err:#}")),
+    );
+}
+
 fn record_delete_failure(
     del: &PendingDelete,
     side: DeleteSide,
@@ -429,6 +554,13 @@ fn delete_label(side: DeleteSide) -> &'static str {
     match side {
         DeleteSide::RootA => "Delete on A",
         DeleteSide::RootB => "Delete on B",
+    }
+}
+
+fn link_label(direction: CopyDirection) -> &'static str {
+    match direction {
+        CopyDirection::AtoB => "Link A → B",
+        CopyDirection::BtoA => "Link B → A",
     }
 }
 
@@ -473,6 +605,65 @@ fn run_remote_delete(root: &SshRoot, deletes: &[PendingDelete]) -> Result<()> {
     if code != 0 {
         let message = String::from_utf8_lossy(&err);
         bail!("remote delete failed: {}", message.trim());
+    }
+    Ok(())
+}
+
+fn run_local_links(root: &crate::roots::LocalRoot, links: &[PendingLink]) -> Result<()> {
+    use std::io;
+    for link in links {
+        if link.path == link.target {
+            continue;
+        }
+        let path = root.path().join(&link.path);
+        let target = root.path().join(&link.target);
+        if let Err(err) = std::fs::remove_file(&path) {
+            if err.kind() != io::ErrorKind::NotFound {
+                return Err(err.into());
+            }
+        }
+        std::fs::hard_link(&target, &path)?;
+    }
+    Ok(())
+}
+
+fn run_remote_links(root: &SshRoot, links: &[PendingLink]) -> Result<()> {
+    if links.is_empty() {
+        return Ok(());
+    }
+    let root_q = shell_quote_path(root.path());
+    let mut cmd = format!("cd {root_q} && ");
+    let targets: std::collections::HashSet<&str> =
+        links.iter().map(|link| link.target.as_str()).collect();
+    let mut remove_any = false;
+    for link in links {
+        if targets.contains(link.path.as_str()) {
+            continue;
+        }
+        cmd.push_str("rm -f -- ");
+        cmd.push_str(&shell_quote(&link.path));
+        cmd.push_str(" && ");
+        remove_any = true;
+    }
+    if !remove_any {
+        cmd.push_str("true && ");
+    }
+    for link in links {
+        if link.path == link.target {
+            continue;
+        }
+        cmd.push_str("ln -- ");
+        cmd.push_str(&shell_quote(&link.target));
+        cmd.push(' ');
+        cmd.push_str(&shell_quote(&link.path));
+        cmd.push_str(" && ");
+    }
+    cmd.push_str("true");
+
+    let (_out, err, code) = root.exec(&cmd)?;
+    if code != 0 {
+        let message = String::from_utf8_lossy(&err);
+        bail!("remote link failed: {}", message.trim());
     }
     Ok(())
 }

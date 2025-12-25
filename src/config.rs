@@ -3,6 +3,7 @@ use serde::{Deserialize, Serialize};
 use std::path::Path;
 
 #[derive(Debug, Deserialize, Serialize, Clone)]
+#[serde(deny_unknown_fields)]
 pub struct Config {
     pub root_a: Option<String>,
     pub root_b: Option<String>,
@@ -10,9 +11,9 @@ pub struct Config {
     pub ignore: Option<Vec<String>>,
     #[serde(default)]
     pub force: Option<String>,
-    /// Skip files with hard link count > 1
+    /// Hardlink handling mode
     #[serde(default)]
-    pub skip_hardlinks: bool,
+    pub hardlinks: HardlinkMode,
     /// Hashing strategy: `Balanced` hashes when metadata changed, `Always` hashes every file
     #[serde(default)]
     pub hash_mode: HashMode,
@@ -32,7 +33,7 @@ impl Default for Config {
             include: None,
             ignore: None,
             force: None,
-            skip_hardlinks: false,
+            hardlinks: HardlinkMode::Copy,
             hash_mode: HashMode::Balanced,
             preserve_owner: Self::default_preserve(),
             preserve_permissions: Self::default_preserve(),
@@ -47,6 +48,15 @@ pub enum HashMode {
     #[default]
     Balanced,
     Always,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize, Default)]
+#[serde(rename_all = "lowercase")]
+pub enum HardlinkMode {
+    #[default]
+    Copy,
+    Skip,
+    Preserve,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

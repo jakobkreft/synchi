@@ -56,6 +56,9 @@ impl SshRoot {
         if self.run_test_cmd("find . -maxdepth 0 -printf ''") {
             caps.has_find_printf = true;
         }
+        if caps.has_find_printf && self.run_test_cmd("find . -maxdepth 0 -printf '%D %i'") {
+            caps.has_find_inode = true;
+        }
         Ok(caps)
     }
 

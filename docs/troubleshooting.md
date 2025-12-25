@@ -48,6 +48,20 @@ To fix this:
 * Install GNU `findutils` on the remote host, or
 * Ensure the BusyBox version of `find` includes `-printf`
 
+## Hardlink mode errors
+
+If you see errors like:
+
+* `Hardlink modes require inode/device IDs`
+* `Hardlink modes require remote find with %D/%i support`
+
+then your platform does not provide inode/device IDs for scanning. Skip and preserve need these IDs to build link groups.
+
+Fixes:
+
+* For SSH roots, install GNU `findutils` (so `find -printf` supports `%D` and `%i`).
+* If the destination filesystem does not support hardlinks, use `hardlinks = "copy"` or `"skip"`.
+
 
 ## Ownership or permission errors on NAS / SMB / Android
 

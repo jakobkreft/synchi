@@ -81,7 +81,7 @@ Run `synchi sync --help` for more info about options.
 
 Synchi synchronizes files in five steps:
 
-1. Scan both roots, applying include/ignore rules and respecting hard links.
+1. Scan both roots, applying include/ignore rules and the selected hardlink mode.
 2. Detect changes since the last run, using optional hashing for accuracy.
 3. Compare the results to classify files as new, modified, or deleted.
 4. Plan the operations, automatically handling or letting you resolve conflicts.
@@ -96,14 +96,14 @@ Only genuinely new or changed files are transferred, making syncing efficient an
 | `root_a`, `root_b` | Paths or SSH specs (`ssh://user@host:port/path`). scp-style `user@host:/path` is not supported. |
 | `include`      | Glob allow-list; default `["**"]`. An empty list means “sync nothing” and emits a warning. |
 | `ignore`       | Glob block-list; `.synchi` is always ignored. |
-| `skip_hardlinks` | Skip files whose link count > 1 on both roots. |
+| `hardlinks`    | `"copy"` (default), `"skip"`, or `"preserve"`. Copy mode does not explicitly preserve links (tar may still keep them). Skip mode removes any path that belongs to a hardlink group on either side. Preserve mode recreates hardlinks and errors if unsupported. |
 | `force`        | `"root_a"`, `"root_b"`, or `"none"` (empty/omitted) to control mirroring. |
 | `hash_mode`    | `"balanced"` (default) or `"always"`. Balanced hashes a file only when its mtime/size changed and uses the hash to confirm the change; always hashes every file. |
 | `preserve_owner` | Default `true`. When `false`, tar extraction runs with `--no-same-owner`, so files keep the destination user’s ownership (useful for SMB/NAS/FUSE targets that reject `chown`). |
 | `preserve_permissions` | Default `true`. When `false`, Synchi skips `chmod`/`touch` steps and omits `--preserve-permissions`, letting the destination filesystem assign modes/mtimes. |
 | `state_db_name` | Optional label inside `.synchi/` for the state database. Synchi appends `.db`, so `project` becomes `.synchi/project.db` (default `state.db`). |
 
-All options can also be overridden via CLI flags (e.g., `--root-a`, `--root-b`, `--hash-mode`, `--force root_a`, `--state-db-name archive`, `--dry-run`, `-y`, `--copy-a-to-b no`).
+All options can also be overridden via CLI flags (e.g., `--root-a`, `--root-b`, `--hardlinks`, `--hash-mode`, `--force root_a`, `--state-db-name archive`, `--dry-run`, `-y`, `--copy-a-to-b no`).
 
 Create your own config file `config.toml`
 
@@ -125,8 +125,8 @@ force = "root_a"
 # Hashing strategy: "balanced" (default) or "always"
 hash_mode = "balanced"
 
-# Skip files that have multiple hard links on both roots
-skip_hardlinks = true
+# Hardlink handling: "copy" (default), "skip", or "preserve"
+hardlinks = "skip"
 
 # Preserve ownership and permissions on synced files
 preserve_owner = false

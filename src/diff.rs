@@ -1,7 +1,8 @@
 use crate::roots::EntryKind;
-use crate::state::Entry;
+use crate::scan::Entry as ScanEntry;
+use crate::state::Entry as StateEntry;
 use std::collections::{HashMap, HashSet};
-use tracing::{debug, warn};
+use tracing::debug;
 
 use crate::scan::Filter;
 
@@ -21,8 +22,8 @@ pub enum ChangeType {
 #[derive(Debug, Clone)]
 pub struct SideChange {
     pub change: ChangeType,
-    pub entry_now: Option<Entry>,
-    pub entry_prev: Option<Entry>, // From state DB
+    pub entry_now: Option<ScanEntry>,
+    pub entry_prev: Option<StateEntry>, // From state DB
 }
 
 #[derive(Debug, Clone)]
@@ -55,10 +56,10 @@ pub struct DiffEngine;
 
 impl DiffEngine {
     pub fn diff(
-        scan_a: Vec<Entry>,
-        state_a: Vec<Entry>,
-        scan_b: Vec<Entry>,
-        state_b: Vec<Entry>,
+        scan_a: Vec<ScanEntry>,
+        state_a: Vec<StateEntry>,
+        scan_b: Vec<ScanEntry>,
+        state_b: Vec<StateEntry>,
         filter: &Filter,
     ) -> Vec<DiffResult> {
         // Index everything by path
@@ -71,10 +72,10 @@ impl DiffEngine {
         );
         let mut all_paths = HashSet::new();
 
-        let map_scan_a = Self::index_entries(scan_a, &mut all_paths);
-        let map_state_a = Self::index_entries(state_a, &mut all_paths);
-        let map_scan_b = Self::index_entries(scan_b, &mut all_paths);
-        let map_state_b = Self::index_entries(state_b, &mut all_paths);
+        let map_scan_a = Self::index_scan_entries(scan_a, &mut all_paths);
+        let map_state_a = Self::index_state_entries(state_a, &mut all_paths);
+        let map_scan_b = Self::index_scan_entries(scan_b, &mut all_paths);
+        let map_state_b = Self::index_state_entries(state_b, &mut all_paths);
 
         let mut results = Vec::new();
         let mut sorted_paths: Vec<_> = all_paths.into_iter().collect();
@@ -120,10 +121,22 @@ impl DiffEngine {
         results
     }
 
-    fn index_entries(
-        entries: Vec<Entry>,
+    fn index_scan_entries(
+        entries: Vec<ScanEntry>,
         all_paths: &mut HashSet<String>,
-    ) -> HashMap<String, Entry> {
+    ) -> HashMap<String, ScanEntry> {
+        let mut map = HashMap::new();
+        for e in entries {
+            all_paths.insert(e.path.clone());
+            map.insert(e.path.clone(), e);
+        }
+        map
+    }
+
+    fn index_state_entries(
+        entries: Vec<StateEntry>,
+        all_paths: &mut HashSet<String>,
+    ) -> HashMap<String, StateEntry> {
         let mut map = HashMap::new();
         for e in entries {
             all_paths.insert(e.path.clone());
@@ -133,9 +146,9 @@ impl DiffEngine {
     }
 
     fn classify_side(
-        path: &str,
-        current: Option<&Entry>,
-        previous: Option<&Entry>,
+        _path: &str,
+        current: Option<&ScanEntry>,
+        previous: Option<&StateEntry>,
         ignored: bool,
     ) -> SideChange {
         // If ignored, and Not in Scan (None), we treat as Unchanged/NoOp even if in State.
@@ -147,25 +160,11 @@ impl DiffEngine {
                 // we treat normally? Or force ignore?
                 // Scanner should respect filter.
 
-                if p.deleted && !c.deleted {
-                    if p.deleted {
-                        (ChangeType::Created, Some(c.clone()), Some(p.clone()))
-                    } else if c.kind != p.kind {
-                        (ChangeType::TypeChanged, Some(c.clone()), Some(p.clone()))
-                    } else if Self::is_modified(c, p) {
-                        (ChangeType::Modified, Some(c.clone()), Some(p.clone()))
-                    } else {
-                        (ChangeType::Unchanged, Some(c.clone()), Some(p.clone()))
-                    }
-                } else if !p.deleted && c.deleted {
-                    warn!(
-                        "Scan entry unexpectedly marked deleted for {}; treating as modified",
-                        path
-                    );
-                    (ChangeType::Modified, Some(c.clone()), Some(p.clone()))
+                if p.deleted {
+                    (ChangeType::Created, Some(c.clone()), Some(p.clone()))
                 } else if c.kind != p.kind {
                     (ChangeType::TypeChanged, Some(c.clone()), Some(p.clone()))
-                } else if Self::is_modified(c, p) {
+                } else if Self::is_modified_scan_state(c, p) {
                     (ChangeType::Modified, Some(c.clone()), Some(p.clone()))
                 } else {
                     (ChangeType::Unchanged, Some(c.clone()), Some(p.clone()))
@@ -199,7 +198,7 @@ impl DiffEngine {
         }
     }
 
-    fn is_modified(c: &Entry, p: &Entry) -> bool {
+    fn is_modified_scan_state(c: &ScanEntry, p: &StateEntry) -> bool {
         if c.kind != p.kind {
             return true;
         }
@@ -212,6 +211,23 @@ impl DiffEngine {
             EntryKind::Dir => false,
             EntryKind::Symlink => {
                 c.link_target != p.link_target || c.mode != p.mode || c.size != p.size
+            }
+        }
+    }
+
+    fn is_modified_scan_scan(a: &ScanEntry, b: &ScanEntry) -> bool {
+        if a.kind != b.kind {
+            return true;
+        }
+
+        match a.kind {
+            EntryKind::File => match (&a.hash, &b.hash) {
+                (Some(curr), Some(prev)) => curr != prev,
+                _ => a.size != b.size || a.mtime != b.mtime || a.mode != b.mode,
+            },
+            EntryKind::Dir => false,
+            EntryKind::Symlink => {
+                a.link_target != b.link_target || a.mode != b.mode || a.size != b.size
             }
         }
     }
@@ -320,7 +336,7 @@ impl DiffEngine {
 
     fn entries_match(a: &SideChange, b: &SideChange) -> bool {
         match (&a.entry_now, &b.entry_now) {
-            (Some(ea), Some(eb)) => ea.kind == eb.kind && !Self::is_modified(ea, eb),
+            (Some(ea), Some(eb)) => ea.kind == eb.kind && !Self::is_modified_scan_scan(ea, eb),
             _ => false,
         }
     }
