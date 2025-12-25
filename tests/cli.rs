@@ -73,3 +73,33 @@ fn status_without_init_reports_message() {
         .success()
         .stdout(contains("Not initialized"));
 }
+
+#[test]
+fn sync_with_empty_include_performs_no_ops() {
+    let dir = tempfile::tempdir().unwrap();
+    let root_a = dir.path().join("root_a");
+    let root_b = dir.path().join("root_b");
+    fs::create_dir_all(&root_a).unwrap();
+    fs::create_dir_all(&root_b).unwrap();
+
+    fs::write(root_a.join("file_a.txt"), "data").unwrap();
+    fs::write(root_b.join("file_b.txt"), "data").unwrap();
+
+    let config_path = dir.path().join("config.toml");
+    fs::write(
+        &config_path,
+        "root_a = \"./root_a\"\nroot_b = \"./root_b\"\ninclude = []\n",
+    )
+    .unwrap();
+
+    let mut cmd = cargo_bin_cmd!("synchi");
+    cmd.current_dir(dir.path())
+        .arg("--config")
+        .arg(&config_path)
+        .arg("sync")
+        .arg("--yes")
+        .assert()
+        .success()
+        .stdout(contains("Executing 0 operations"))
+        .stderr(contains("Include patterns are empty"));
+}

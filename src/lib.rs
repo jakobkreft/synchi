@@ -43,8 +43,10 @@ pub fn run(cli: Cli) -> Result<()> {
             tracing_subscriber::EnvFilter::try_from_default_env()
                 .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new(&env_filter)),
         )
+        .with_writer(std::io::stderr)
         .finish();
-    tracing::subscriber::set_global_default(subscriber).expect("setting default subscriber failed");
+    tracing::subscriber::set_global_default(subscriber)
+        .context("setting default subscriber failed")?;
 
     let default_config_path = dirs::config_dir()
         .map(|d| d.join("synchi").join("config.toml"))
@@ -176,7 +178,10 @@ pub fn run(cli: Cli) -> Result<()> {
                     .scan_with_progress(Some(pb))
             }, &console)?;
             let mut scan_b = if root_b.kind() == roots::RootType::Ssh {
-                let ssh_root = root_b.as_any().downcast_ref::<roots::SshRoot>().unwrap();
+                let ssh_root = root_b
+                    .as_any()
+                    .downcast_ref::<roots::SshRoot>()
+                    .context("Root B is not SSH")?;
                 let caps = ssh_root.probe_caps()?;
                 let label_b = format!("Root B ({})", ssh_root.path().display());
                 info!("Scanning {}", label_b);
@@ -185,7 +190,10 @@ pub fn run(cli: Cli) -> Result<()> {
                         .scan_with_progress(Some(pb))
                 }, &console)?
             } else {
-                let local_b = root_b.as_any().downcast_ref::<roots::LocalRoot>().unwrap();
+                let local_b = root_b
+                    .as_any()
+                    .downcast_ref::<roots::LocalRoot>()
+                    .context("Root B is not local")?;
                 let label_b = format!("Root B ({})", local_b.path().display());
                 info!("Scanning {}", label_b);
                 run_scan_with_progress(&label_b, Some(state_hint), |pb| {
@@ -306,7 +314,7 @@ pub fn run(cli: Cli) -> Result<()> {
                 let ssh_root = root_b
                     .as_any()
                     .downcast_ref::<roots::SshRoot>()
-                    .expect("Should be SSH root");
+                    .context("Root B is not SSH")?;
                 let caps = ssh_root.probe_caps()?;
                 let label_b = format!("Root B ({})", ssh_root.path().display());
                 info!("Scanning {}", label_b);

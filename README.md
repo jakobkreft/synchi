@@ -94,7 +94,7 @@ Only genuinely new or changed files are transferred, making syncing efficient an
 | Key            | Description |
 | -------------- | ----------- |
 | `root_a`, `root_b` | Paths or SSH specs (`ssh://user@host:port/path`). scp-style `user@host:/path` is not supported. |
-| `include`      | Glob allow-list; default `["**"]`. |
+| `include`      | Glob allow-list; default `["**"]`. An empty list means “sync nothing” and emits a warning. |
 | `ignore`       | Glob block-list; `.synchi` is always ignored. |
 | `skip_hardlinks` | Skip files whose link count > 1 on both roots. |
 | `force`        | `"root_a"`, `"root_b"`, or `"none"` (empty/omitted) to control mirroring. |
@@ -132,7 +132,7 @@ skip_hardlinks = true
 preserve_owner = false
 preserve_permissions = true
 
-# Include patterns (files/directories to sync)
+# Include patterns (files/directories to sync). An empty list means “sync nothing”.
 include = ["**/*.txt", "**/docs/**"]
 
 # Ignore patterns (files/directories to skip)

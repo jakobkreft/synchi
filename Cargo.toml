@@ -2,6 +2,10 @@
 name = "synchi"
 version = "0.1.0"
 edition = "2021"
+description = "Two-way file sync with conflict detection for local and SSH roots."
+license = "GPL-3.0-only"
+repository = "https://github.com/jakobkreft/synchi"
+homepage = "https://github.com/jakobkreft/synchi"
 
 [dependencies]
 anyhow = "1.0"

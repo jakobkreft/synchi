@@ -174,10 +174,17 @@ struct TarStream {
 
 impl TarStream {
     fn new(src_root: &dyn Root, dest_root: &dyn Root, behavior: CopyBehavior) -> Result<Self> {
-        let (pack_child, pack_stdin, pack_stdout, pack_stderr) =
+        let (mut pack_child, pack_stdin, pack_stdout, pack_stderr) =
             spawn_tar_pack(src_root).context("launching tar pack on source root")?;
-        let (unpack_child, unpack_stdin, unpack_stderr) = spawn_tar_unpack(dest_root, behavior)
-            .context("launching tar unpack on destination root")?;
+        let (unpack_child, unpack_stdin, unpack_stderr) =
+            match spawn_tar_unpack(dest_root, behavior).context("launching tar unpack on destination root") {
+                Ok(result) => result,
+                Err(err) => {
+                    let _ = pack_child.kill();
+                    let _ = pack_child.wait();
+                    return Err(err);
+                }
+            };
 
         let counter = Arc::new(AtomicU64::new(0));
         let pump_counter = counter.clone();

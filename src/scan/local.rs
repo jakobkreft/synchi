@@ -119,7 +119,10 @@ impl<'a> LocalScanner<'a> {
                 continue;
             };
 
-            let path_str = rel_path.to_string_lossy().replace('\\', "/");
+            let mut path_str = rel_path.to_string_lossy().to_string();
+            if cfg!(windows) {
+                path_str = path_str.replace('\\', "/");
+            }
             let path_str = path_str.trim_start_matches("./").to_string();
 
             if path_str.is_empty() || !seen.insert(path_str.clone()) {
@@ -221,6 +224,27 @@ mod tests {
             .expect("symlink not found");
         assert_eq!(link_entry.kind, EntryKind::Symlink);
         assert_eq!(link_entry.link_target.as_deref(), Some("keep.txt"));
+
+        Ok(())
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn test_local_scanner_preserves_backslashes() -> Result<()> {
+        let tmp = TempDir::new()?;
+        let root_path = tmp.path();
+
+        let file_name = "foo\\bar.txt";
+        File::create(root_path.join(file_name))?.write_all(b"content")?;
+
+        let root = LocalRoot::new(root_path)?;
+        let filter = Filter::new(&["**".to_string()], &[])?;
+        let scanner = LocalScanner::new(&root, &filter);
+        let entries = scanner.scan()?;
+
+        let paths: Vec<String> = entries.iter().map(|e| e.path.clone()).collect();
+        assert!(paths.contains(&file_name.to_string()));
+        assert!(!paths.contains(&"foo/bar.txt".to_string()));
 
         Ok(())
     }

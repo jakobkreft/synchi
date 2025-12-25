@@ -99,7 +99,9 @@ impl Root for LocalRoot {
             fs::create_dir_all(parent)?;
         }
 
-        let parent_dir = abs_path.parent().unwrap();
+        let parent_dir = abs_path
+            .parent()
+            .context("Failed to resolve parent directory for write")?;
         let mut temp_file = NamedTempFile::new_in(parent_dir)?;
 
         io::copy(content, &mut temp_file)?;

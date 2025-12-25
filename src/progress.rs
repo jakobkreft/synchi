@@ -1,9 +1,9 @@
 use indicatif::ProgressStyle;
 
 pub fn bar_style() -> ProgressStyle {
-    ProgressStyle::with_template(
+    let style = ProgressStyle::with_template(
         "{spinner:.green} {msg} [{elapsed_precise}] [{bar:24.cyan/blue}] {pos}/{len}",
     )
-    .unwrap()
-    .progress_chars("=> ")
+    .unwrap_or_else(|_| ProgressStyle::default_bar());
+    style.progress_chars("=> ")
 }

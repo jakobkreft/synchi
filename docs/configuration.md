@@ -60,7 +60,7 @@ include = ["Documents/**", "**/*.txt"]
 ignore = ["**/node_modules/**"]
 ```
 
-Include acts as a whitelist. Files not matched by `include` are ignored entirely.
+Include acts as a whitelist. Files not matched by `include` are ignored entirely. If `include = []`, Synchi scans nothing and performs no sync operations (it will warn you about the empty include list).
 
 ## Hash Modes
 

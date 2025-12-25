@@ -316,6 +316,10 @@ impl Root for SshRoot {
     fn create_symlink(&self, target: &str, path: &Path) -> Result<()> {
         let abs_path = self.root_path.join(path);
         let abs_path_q = shell_quote_path(&abs_path);
+        if let Some(parent) = abs_path.parent() {
+            let parent_q = shell_quote_path(parent);
+            self.exec_checked(&format!("mkdir -p -- {parent_q}"))?;
+        }
         let target_q = shell_quote(target);
         self.exec_checked(&format!("rm -f -- {abs_path_q} && ln -s -- {target_q} {abs_path_q}"))?;
         Ok(())

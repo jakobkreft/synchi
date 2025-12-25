@@ -1,7 +1,7 @@
 use crate::roots::EntryKind;
 use crate::state::Entry;
 use std::collections::{HashMap, HashSet};
-use tracing::debug;
+use tracing::{debug, warn};
 
 use crate::scan::Filter;
 
@@ -133,7 +133,7 @@ impl DiffEngine {
     }
 
     fn classify_side(
-        _path: &str,
+        path: &str,
         current: Option<&Entry>,
         previous: Option<&Entry>,
         ignored: bool,
@@ -158,7 +158,11 @@ impl DiffEngine {
                         (ChangeType::Unchanged, Some(c.clone()), Some(p.clone()))
                     }
                 } else if !p.deleted && c.deleted {
-                    panic!("Scan entry should not be deleted");
+                    warn!(
+                        "Scan entry unexpectedly marked deleted for {}; treating as modified",
+                        path
+                    );
+                    (ChangeType::Modified, Some(c.clone()), Some(p.clone()))
                 } else if c.kind != p.kind {
                     (ChangeType::TypeChanged, Some(c.clone()), Some(p.clone()))
                 } else if Self::is_modified(c, p) {
