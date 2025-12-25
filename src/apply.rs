@@ -595,18 +595,63 @@ fn run_remote_delete(root: &SshRoot, deletes: &[PendingDelete]) -> Result<()> {
         return Ok(());
     }
 
-    let mut cmd = format!("cd {} && rm -rf --", shell_quote_path(root.path()));
-    for del in deletes {
-        cmd.push(' ');
-        cmd.push_str(&shell_quote(&del.path));
+    let (rm_cmd, rmdir_cmd) = build_remote_delete_commands(root.path(), deletes);
+
+    if let Some(cmd) = rm_cmd {
+        let (_out, err, code) = root.exec(&cmd)?;
+        if code != 0 {
+            let message = String::from_utf8_lossy(&err);
+            bail!("remote remove failed: {}", message.trim());
+        }
     }
 
-    let (_out, err, code) = root.exec(&cmd)?;
-    if code != 0 {
-        let message = String::from_utf8_lossy(&err);
-        bail!("remote delete failed: {}", message.trim());
+    if let Some(cmd) = rmdir_cmd {
+        let (_out, err, code) = root.exec(&cmd)?;
+        if code != 0 {
+            let message = String::from_utf8_lossy(&err);
+            bail!("remote rmdir failed: {}", message.trim());
+        }
     }
     Ok(())
+}
+
+fn build_remote_delete_commands(
+    root_path: &Path,
+    deletes: &[PendingDelete],
+) -> (Option<String>, Option<String>) {
+    let mut files = Vec::new();
+    let mut dirs = Vec::new();
+    for del in deletes {
+        match del.kind {
+            EntryKind::Dir => dirs.push(del.path.as_str()),
+            _ => files.push(del.path.as_str()),
+        }
+    }
+
+    let root_q = shell_quote_path(root_path);
+    let rm_cmd = if files.is_empty() {
+        None
+    } else {
+        let mut cmd = format!("cd {root_q} && rm --");
+        for path in files {
+            cmd.push(' ');
+            cmd.push_str(&shell_quote(path));
+        }
+        Some(cmd)
+    };
+
+    let rmdir_cmd = if dirs.is_empty() {
+        None
+    } else {
+        let mut cmd = format!("cd {root_q} && rmdir --");
+        for path in dirs {
+            cmd.push(' ');
+            cmd.push_str(&shell_quote(path));
+        }
+        Some(cmd)
+    };
+
+    (rm_cmd, rmdir_cmd)
 }
 
 fn run_local_links(root: &crate::roots::LocalRoot, links: &[PendingLink]) -> Result<()> {
@@ -799,5 +844,46 @@ fn format_duration(duration: Duration) -> String {
         format!("{:02}:{:02}:{:02}", hours, minutes, seconds)
     } else {
         format!("{:02}:{:02}", minutes, seconds)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn build_remote_delete_commands_splits_files_and_dirs() {
+        let deletes = vec![
+            PendingDelete {
+                id: 1,
+                path: "a.txt".to_string(),
+                kind: EntryKind::File,
+            },
+            PendingDelete {
+                id: 2,
+                path: "dir".to_string(),
+                kind: EntryKind::Dir,
+            },
+            PendingDelete {
+                id: 3,
+                path: "link".to_string(),
+                kind: EntryKind::Symlink,
+            },
+        ];
+
+        let (rm_cmd, rmdir_cmd) =
+            build_remote_delete_commands(Path::new("/root"), &deletes);
+
+        let rm_cmd = rm_cmd.expect("rm command");
+        let rmdir_cmd = rmdir_cmd.expect("rmdir command");
+
+        assert!(rm_cmd.contains("rm --"));
+        assert!(rm_cmd.contains("'a.txt'"));
+        assert!(rm_cmd.contains("'link'"));
+        assert!(!rm_cmd.contains("'dir'"));
+
+        assert!(rmdir_cmd.contains("rmdir --"));
+        assert!(rmdir_cmd.contains("'dir'"));
+        assert!(!rmdir_cmd.contains("'a.txt'"));
     }
 }

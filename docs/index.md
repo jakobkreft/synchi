@@ -28,7 +28,7 @@ It does not watch files, run in the background, or try to hide what it’s doing
 
 At a high level, Synchi does the following:
 
-1. Scans both roots while applying include and ignore rules  
+1. Scans both roots while applying include and ignore rules (include defines the sync scope)  
 2. Detects changes since the previous run  
 3. Classifies files as new, modified, deleted, or conflicting  
 4. Plans the required operations  

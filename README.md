@@ -15,7 +15,7 @@ Synchi keeps files in two places in sync. Each time it runs, it detects changes 
 - Detects changes since the last run to catch conflicts.
 - Flexible conflict handling: mirror one way automatically or resolve conflicts interactively.
 - Works with local and remote folders over SSH.
-- Honors include/ignore rules.
+- Honors include/ignore rules (include defines the sync scope; out-of-scope paths are ignored, not deleted).
 - Hashing for more accurate change detection.
 
 Full documentation is available [here](docs/index.md).
@@ -94,8 +94,8 @@ Only genuinely new or changed files are transferred, making syncing efficient an
 | Key            | Description |
 | -------------- | ----------- |
 | `root_a`, `root_b` | Paths or SSH specs (`ssh://user@host:port/path`). scp-style `user@host:/path` is not supported. |
-| `include`      | Glob allow-list; default `["**"]`. An empty list means “sync nothing” and emits a warning. |
-| `ignore`       | Glob block-list; `.synchi` is always ignored. |
+| `include`      | Glob allow-list; default `["**"]`. Only included paths are scanned or synced. An empty list means “sync nothing” and emits a warning. |
+| `ignore`       | Glob block-list applied after include; `.synchi` is always ignored. Ignored paths are excluded from scanning and won’t be deleted. |
 | `hardlinks`    | `"copy"` (default), `"skip"`, or `"preserve"`. Copy mode does not explicitly preserve links (tar may still keep them). Skip mode removes any path that belongs to a hardlink group on either side. Preserve mode recreates hardlinks and errors if unsupported. |
 | `force`        | `"root_a"`, `"root_b"`, or `"none"` (empty/omitted) to control mirroring. |
 | `hash_mode`    | `"balanced"` (default) or `"always"`. Balanced hashes a file only when its mtime/size changed and uses the hash to confirm the change; always hashes every file. |

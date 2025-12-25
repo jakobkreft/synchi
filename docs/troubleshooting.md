@@ -94,12 +94,11 @@ On Android, keeping Termux awake during syncs is often necessary.
 
 ## Include or ignore changes behave unexpectedly
 
-If you tighten `include`, files that were previously tracked may show up as deletions. This is expected: the state database still remembers them.
+If you tighten `include` or add `ignore` patterns, previously tracked paths may still exist in the state database, but they are treated as out of scope. Synchi will not scan or delete them.
 
-You can either:
+If you want to completely reset the tracked scope:
 
-* Let Synchi apply the deletions, or
-* Delete `.synchi/<state_db_name>.db` (default `state.db`) and run `synchi init` to reset the state
+* Delete `.synchi/<state_db_name>.db` (default `state.db`) and run `synchi init` to rebuild state for the new scope.
 
 ## Diagnostic tips
 

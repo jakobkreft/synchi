@@ -48,6 +48,12 @@ Most users only need to adjust `root_a`, `root_b`, and possibly `include` / `ign
 
 ## Include and Ignore Patterns
 
+Include and ignore define the sync scope:
+
+* `include` is an allow-list: only matching paths are scanned and considered for sync.
+* `ignore` is a deny-list applied after include: matching paths are excluded from scanning and will not be deleted.
+* Paths outside `include` (or inside `ignore`) are out of scope and treated as unchanged, even if they were previously tracked.
+
 Patterns use standard glob syntax:
 
 * `*` matches within a single path segment
