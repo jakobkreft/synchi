@@ -36,7 +36,7 @@ Most users only need to adjust `root_a`, `root_b`, and possibly `include` / `ign
 | Key                    | Description                                                                                              | Default      |
 | ---------------------- | -------------------------------------------------------------------------------------------------------- | ------------ |
 | `root_a`               | First root directory. Stores Synchi’s state and is treated symmetrically unless `force` is used.         | required     |
-| `root_b`               | Second root directory. Can be local or an SSH target (`user@host:/path` or `ssh://user@host:port/path`). | required     |
+| `root_b`               | Second root directory. Can be local or an SSH target (`ssh://user@host:port/path`). scp-style `user@host:/path` is not supported. | required     |
 | `include`              | Glob patterns of paths to include. Patterns are relative to each root.                                   | `["**"]`     |
 | `ignore`               | Glob patterns of paths to exclude. `.synchi` is always ignored.                                          | `[]`         |
 | `force`                | `"root_a"`, `"root_b"`, or `"none"`. Forces one-way mirroring or allows two-way sync.                    | `"none"`     |

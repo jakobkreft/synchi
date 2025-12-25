@@ -54,11 +54,11 @@ synchi init --root-a ./folderA --root-b ./folderB
 # Local <-> local
 synchi sync --root-a ./folderA --root-b ./folderB
 
-# Local <-> remote (scp-style)
-synchi sync --root-a ./folderA --root-b user@host:/path/to/folderB
-
 # Local <-> remote (ssh://, allows custom port 8022, etc.)
 synchi sync --root-a ./folderA --root-b ssh://user@host:8022/remote/path
+
+# Note: Only ssh:// is supported for remote roots.
+# scp-style user@host:/path is not supported.
 ```
 
 Root A always holds `.synchi` and the SQLite database, so it must be writable.
@@ -93,7 +93,7 @@ Only genuinely new or changed files are transferred, making syncing efficient an
 
 | Key            | Description |
 | -------------- | ----------- |
-| `root_a`, `root_b` | Paths or SSH specs (`user@host:/path` or `ssh://user@host:port/path`). |
+| `root_a`, `root_b` | Paths or SSH specs (`ssh://user@host:port/path`). scp-style `user@host:/path` is not supported. |
 | `include`      | Glob allow-list; default `["**"]`. |
 | `ignore`       | Glob block-list; `.synchi` is always ignored. |
 | `skip_hardlinks` | Skip files whose link count > 1 on both roots. |
@@ -151,4 +151,4 @@ This will perform a sync according to the settings in your config file.
 
 - Use `synchi -v ...` to surface detailed tracing, including scan locations and remote commands.
 - When in doubt, run `synchi status` first; it takes the same code path as `sync` without mutating either root.
-- For reliable SSH behavior, prefer the `ssh://` form whenever you need non-default ports, user-less logins, or future SSH options.
+- Use the `ssh://` form for all remote roots.

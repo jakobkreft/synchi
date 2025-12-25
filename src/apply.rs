@@ -114,6 +114,7 @@ impl<'a> Executor<'a> {
         let nonbyte_progress = Arc::new(AtomicU64::new(0));
         let mut monitor = MonitorGuard::new();
         let mut pending_commits: Vec<PendingCopy> = Vec::new();
+        let mut deferred_ops: Vec<Operation> = Vec::new();
         let mut streaming = false;
 
         loop {
@@ -150,12 +151,23 @@ impl<'a> Executor<'a> {
                 stats,
                 &mut chunk_records,
             );
-
-            for (op, result) in chunk_records.drain(..) {
-                journal.record(op, result);
-            }
-
-            let progress = progress?;
+            let progress = if streaming {
+                match progress {
+                    Ok(progress) => {
+                        deferred_ops.extend(chunk_records.drain(..).map(|(op, _)| op));
+                        progress
+                    }
+                    Err(err) => {
+                        record_stream_failures(journal, &mut deferred_ops, &mut chunk_records, &err);
+                        return Err(err);
+                    }
+                }
+            } else {
+                for (op, result) in chunk_records.drain(..) {
+                    journal.record(op, result);
+                }
+                progress?
+            };
             nonbyte_progress.fetch_add(progress.nonbyte_units, Ordering::Relaxed);
             if !monitor.is_active() {
                 bytes_done += progress.bytes;
@@ -193,15 +205,33 @@ impl<'a> Executor<'a> {
         }
 
         if let Some(stream) = stream {
-            stream
-                .finish()
-                .context("finalizing streaming copy session")?;
-            if streaming && !pending_commits.is_empty() {
-                for batch in pending_commits.chunks(self.copy_chunk) {
-                    self.db
-                        .complete_pending_copies(batch)
-                        .context("committing copy results to state DB")?;
+            if streaming {
+                if let Err(err) = stream
+                    .finish()
+                    .context("finalizing streaming copy session")
+                {
+                    record_stream_finish_failures(journal, &mut deferred_ops, &err);
+                    return Err(err);
                 }
+                if !pending_commits.is_empty() {
+                    for batch in pending_commits.chunks(self.copy_chunk) {
+                        if let Err(err) = self
+                            .db
+                            .complete_pending_copies(batch)
+                            .context("committing copy results to state DB")
+                        {
+                            record_stream_finish_failures(journal, &mut deferred_ops, &err);
+                            return Err(err);
+                        }
+                    }
+                }
+                for op in deferred_ops.drain(..) {
+                    journal.record(op, OpResult::Success);
+                }
+            } else {
+                stream
+                    .finish()
+                    .context("finalizing streaming copy session")?;
             }
         }
 
@@ -394,6 +424,32 @@ fn delete_label(side: DeleteSide) -> &'static str {
     match side {
         DeleteSide::RootA => "Delete on A",
         DeleteSide::RootB => "Delete on B",
+    }
+}
+
+fn record_stream_failures(
+    journal: &mut Journal,
+    deferred_ops: &mut Vec<Operation>,
+    chunk_records: &mut Vec<(Operation, OpResult)>,
+    err: &anyhow::Error,
+) {
+    let message = format!("{err:#}");
+    for op in deferred_ops.drain(..) {
+        journal.record(op, OpResult::Failed(message.clone()));
+    }
+    for (op, result) in chunk_records.drain(..) {
+        journal.record(op, result);
+    }
+}
+
+fn record_stream_finish_failures(
+    journal: &mut Journal,
+    deferred_ops: &mut Vec<Operation>,
+    err: &anyhow::Error,
+) {
+    let message = format!("{err:#}");
+    for op in deferred_ops.drain(..) {
+        journal.record(op, OpResult::Failed(message.clone()));
     }
 }
 

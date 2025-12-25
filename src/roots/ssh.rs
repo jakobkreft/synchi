@@ -3,7 +3,7 @@ use crate::shell::{shell_quote, shell_quote_path};
 use anyhow::{bail, Context, Result};
 use std::io::{self, Read};
 use std::path::{Path, PathBuf};
-use std::process::{Command, Stdio};
+use std::process::{Child, ChildStdout, Command, Stdio};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use url::Url;
 
@@ -16,10 +16,9 @@ pub struct SshRoot {
 
 impl SshRoot {
     pub fn new(spec: &str) -> Result<Self> {
-        if let Ok(url) = Url::parse(spec) {
-            return Self::from_url(url);
-        }
-        Self::from_scp_like(spec)
+        let url = Url::parse(spec)
+            .with_context(|| format!("Invalid SSH spec '{}', use ssh://user@host/path", spec))?;
+        Self::from_url(url)
     }
 
     #[cfg(test)]
@@ -55,30 +54,6 @@ impl SshRoot {
         })
     }
 
-    fn from_scp_like(spec: &str) -> Result<Self> {
-        // Format: [user@]host:path
-        let (user_host_part, path_part) = spec
-            .split_once(':')
-            .context("Invalid SSH target. Use user@host:/path or ssh://user@host/path")?;
-
-        if user_host_part.trim().is_empty() {
-            bail!("Missing host in SSH target: {}", spec);
-        }
-
-        let user_host = user_host_part.trim().to_string();
-        let path = path_part.trim();
-        let root_path = if path.is_empty() {
-            PathBuf::from(".")
-        } else {
-            PathBuf::from(path)
-        };
-
-        Ok(Self {
-            user_host,
-            port: None,
-            root_path,
-        })
-    }
 
     pub(crate) fn ssh_command(&self) -> Command {
         let mut cmd = Command::new("ssh");
@@ -102,6 +77,18 @@ impl SshRoot {
     fn run_test_cmd(&self, cmd: &str) -> bool {
         matches!(self.exec(cmd), Ok((_, _, 0)))
     }
+
+    fn exec_checked(&self, cmd: &str) -> Result<(Vec<u8>, Vec<u8>)> {
+        let (out, err, code) = self.exec(cmd)?;
+        if code != 0 {
+            bail!(
+                "Remote command failed (code {}): {}",
+                code,
+                String::from_utf8_lossy(&err).trim()
+            );
+        }
+        Ok((out, err))
+    }
 }
 
 #[cfg(test)]
@@ -109,11 +96,14 @@ mod tests {
     use super::*;
 
     #[test]
-    fn parses_scp_like() {
-        let root = SshRoot::new("user@example.com:/data").unwrap();
-        assert_eq!(root.user_host(), "user@example.com");
-        assert_eq!(root.port(), None);
-        assert_eq!(root.path(), Path::new("/data"));
+    fn rejects_scp_like() {
+        let err = SshRoot::new("user@example.com:/data")
+            .err()
+            .expect("expected ssh:// error");
+        assert!(
+            err.to_string().contains("ssh://"),
+            "unexpected error: {err}"
+        );
     }
 
     #[test]
@@ -143,6 +133,24 @@ mod tests {
     }
 }
 
+struct SshRead {
+    child: Child,
+    stdout: ChildStdout,
+}
+
+impl Read for SshRead {
+    fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
+        self.stdout.read(buf)
+    }
+}
+
+impl Drop for SshRead {
+    fn drop(&mut self) {
+        let _ = self.child.kill();
+        let _ = self.child.wait();
+    }
+}
+
 impl Root for SshRoot {
     fn kind(&self) -> RootType {
         RootType::Ssh
@@ -160,10 +168,7 @@ impl Root for SshRoot {
         let abs_path_q = shell_quote_path(&abs_path);
         let cmd_str = format!("stat -c '%F|%s|%Y|%f' -- {abs_path_q}");
 
-        let (out, err, code) = self.exec(&cmd_str)?;
-        if code != 0 {
-            bail!("Remote stat failed: {}", String::from_utf8_lossy(&err));
-        }
+        let (out, _err) = self.exec_checked(&cmd_str)?;
         let out_str = String::from_utf8(out)?;
         let parts: Vec<&str> = out_str.trim().split('|').collect();
         if parts.len() < 4 {
@@ -189,10 +194,7 @@ impl Root for SshRoot {
         // mkdir is atomic on POSIX.
         // We also want to write the info inside.
         // Step 1: mkdir lock_path
-        let (_out, err, code) = self.exec(&format!("mkdir -- {abs_path_q}"))?;
-        if code != 0 {
-            bail!("Failed to acquire lock: {}", String::from_utf8_lossy(&err));
-        }
+        self.exec_checked(&format!("mkdir -- {abs_path_q}"))?;
         // Step 2: write info to lock_path/owner
         let info_path = abs_path.join("owner");
         let info_str = info.to_string();
@@ -202,7 +204,7 @@ impl Root for SshRoot {
         // Warning: echo info > path is risky if info has special chars, but PID/Host is usually safe.
         // We'll trust info is simple for now, or sanitize it.
         // Assuming strictly alphanumeric + logic.
-        self.exec(&format!("printf '%s' {info_q} > {info_path_q}"))?;
+        self.exec_checked(&format!("printf '%s' {info_q} > {info_path_q}"))?;
         Ok(())
     }
 
@@ -210,7 +212,7 @@ impl Root for SshRoot {
         let abs_path = self.root_path.join(path);
         let abs_path_q = shell_quote_path(&abs_path);
         // rm -rf lock_path
-        self.exec(&format!("rm -rf -- {abs_path_q}"))?;
+        self.exec_checked(&format!("rm -rf -- {abs_path_q}"))?;
         Ok(())
     }
 
@@ -221,15 +223,9 @@ impl Root for SshRoot {
         let mut cmd = self.ssh_command();
         cmd.arg(format!("cat -- {abs_path_q}"));
 
-        let child = cmd.stdout(Stdio::piped()).spawn()?;
-        let stdout = child.stdout.context("Failed to open stdout")?;
-
-        // We need to keep child alive?
-        // `stdout` is a `ChildStdout`. It doesn't keep the child alive by itself but when dropped pipe closes?
-        // The child process needs to be reaped.
-        // For short reads it's okay, but strictly we should wrap this.
-        // But for now, returning Box<dyn Read> is fine.
-        Ok(Box::new(stdout))
+        let mut child = cmd.stdout(Stdio::piped()).spawn()?;
+        let stdout = child.stdout.take().context("Failed to open stdout")?;
+        Ok(Box::new(SshRead { child, stdout }))
     }
 
     fn write_file(&self, path: &Path, content: &mut dyn Read) -> Result<()> {
@@ -258,7 +254,7 @@ impl Root for SshRoot {
         }
 
         // Rename
-        self.exec(&format!("mv -- {tmp_path_q} {abs_path_q}"))?;
+        self.exec_checked(&format!("mv -- {tmp_path_q} {abs_path_q}"))?;
 
         Ok(())
     }
@@ -271,7 +267,7 @@ impl Root for SshRoot {
         // chmod 0755 path
         // touch -d @ts path (GNU) or -t (POSIX)
         // busybox supports -d @seconds usually.
-        self.exec(&format!(
+        self.exec_checked(&format!(
             "chmod {:o} -- {abs_path_q} && touch -d @{ts} -- {abs_path_q}",
             mode
         ))?;
@@ -281,21 +277,21 @@ impl Root for SshRoot {
     fn mkdirs(&self, path: &Path) -> Result<()> {
         let abs_path = self.root_path.join(path);
         let abs_path_q = shell_quote_path(&abs_path);
-        self.exec(&format!("mkdir -p -- {abs_path_q}"))?;
+        self.exec_checked(&format!("mkdir -p -- {abs_path_q}"))?;
         Ok(())
     }
 
     fn remove_file(&self, path: &Path) -> Result<()> {
         let abs_path = self.root_path.join(path);
         let abs_path_q = shell_quote_path(&abs_path);
-        self.exec(&format!("rm -- {abs_path_q}"))?;
+        self.exec_checked(&format!("rm -- {abs_path_q}"))?;
         Ok(())
     }
 
     fn remove_dir(&self, path: &Path) -> Result<()> {
         let abs_path = self.root_path.join(path);
         let abs_path_q = shell_quote_path(&abs_path);
-        self.exec(&format!("rmdir -- {abs_path_q}"))?; // rmdir for empty dir
+        self.exec_checked(&format!("rmdir -- {abs_path_q}"))?; // rmdir for empty dir
         Ok(())
     }
 

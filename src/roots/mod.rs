@@ -44,12 +44,12 @@ pub fn parse_root_type(spec: &str) -> Result<RootType> {
             return Ok(RootType::Local);
         }
 
-        if left.contains('@') {
-            return Ok(RootType::Ssh);
+        if left.len() == 1 && right.starts_with('\\') {
+            return Ok(RootType::Local);
         }
 
         anyhow::bail!(
-            "Ambiguous root spec '{}'. Use ssh://host/path for remote or prefix './' for local paths containing ':'",
+            "SSH roots must use ssh://user@host/path. scp-style '{}' is not supported.",
             spec
         );
     }
@@ -71,7 +71,6 @@ mod tests {
     #[test]
     fn parse_root_type_prefers_explicit_ssh() {
         assert_eq!(parse_root_type("ssh://host/path").unwrap(), RootType::Ssh);
-        assert_eq!(parse_root_type("user@host:/data").unwrap(), RootType::Ssh);
     }
 
     #[test]
@@ -83,10 +82,10 @@ mod tests {
     }
 
     #[test]
-    fn parse_root_type_rejects_ambiguous_colon() {
-        let err = parse_root_type("host:path").unwrap_err();
+    fn parse_root_type_rejects_scp_style() {
+        let err = parse_root_type("user@host:/data").unwrap_err();
         assert!(
-            err.to_string().contains("Ambiguous root spec"),
+            err.to_string().contains("ssh://"),
             "unexpected error: {err}"
         );
     }

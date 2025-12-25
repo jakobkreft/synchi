@@ -50,6 +50,9 @@ include = ["**"]
 ignore = ["**/.venv/**"]
 # Read configuration instuctions for other options.
 
+# Remote roots must use ssh://user@host/path.
+# scp-style user@host:/path is not supported.
+
 # Run
 synchi sync
 ```
