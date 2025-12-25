@@ -45,7 +45,7 @@ synchi --help
 # Create your own config
 # By default Synchi reads: ~/.config/synchi/config.toml
 root_a = "./root_a"
-root_b = "ssh://user@host:/srv/data"
+root_b = "ssh://user@host/srv/data"
 include = ["**"]
 ignore = ["**/.venv/**"]
 # Read configuration instuctions for other options.

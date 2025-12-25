@@ -114,7 +114,7 @@ Example:
 
 # Paths for the two roots. Can be local or remote via SSH
 root_a = "./local_root"
-root_b = "ssh://user@host:/path/to/remote_root"
+root_b = "ssh://user@host/path/to/remote_root"
 
 # One-way or bidirectional sync:
 # "root_a" - mirror root_a to root_b

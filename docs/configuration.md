@@ -16,7 +16,7 @@ This is a simple, typical setup syncing a local folder with a remote one over SS
 
 ```toml
 root_a = "./local_root"
-root_b = "ssh://user@host:/path/to/remote_root"
+root_b = "ssh://user@host/path/to/remote_root"
 
 include = ["**"]
 ignore = ["**/cache/**", "**/build/**"]
