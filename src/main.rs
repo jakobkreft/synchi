@@ -188,11 +188,12 @@ fn main() -> Result<()> {
 
             let source_path = std::path::Path::new(source);
             let dest_path = std::path::Path::new(dest);
+            let dest_type = roots::parse_root_type(dest)?;
 
             if !source_path.exists() {
                 anyhow::bail!("Root A does not exist: {}", source);
             }
-            if !dest_path.exists() && !dest.contains(':') {
+            if matches!(dest_type, roots::RootType::Local) && !dest_path.exists() {
                 anyhow::bail!("Root B does not exist: {}", dest);
             }
 
@@ -222,11 +223,7 @@ fn main() -> Result<()> {
             let db_filename = config.state_db_filename();
 
             let root_a = roots::LocalRoot::new(source)?;
-            let root_b: Box<dyn roots::Root> = if dest.contains(':') {
-                Box::new(roots::SshRoot::new(dest)?)
-            } else {
-                Box::new(roots::LocalRoot::new(dest)?)
-            };
+            let root_b = roots::root_from_spec(dest)?;
             ensure_root_ready(&root_a)?;
             ensure_root_ready(root_b.as_ref())?;
             let lock_info = lock_info_string();
@@ -334,11 +331,7 @@ fn main() -> Result<()> {
             info!("Syncing from {} to {}", source, dest);
 
             let root_a = roots::LocalRoot::new(source)?;
-            let root_b: Box<dyn roots::Root> = if dest.contains(':') {
-                Box::new(roots::SshRoot::new(dest)?)
-            } else {
-                Box::new(roots::LocalRoot::new(dest)?)
-            };
+            let root_b = roots::root_from_spec(dest)?;
             ensure_root_ready(&root_a)?;
             ensure_root_ready(root_b.as_ref())?;
             let lock_info = lock_info_string();

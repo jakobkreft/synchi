@@ -96,9 +96,66 @@ impl PlanBuilder {
 
         plan.copy_a_to_b.sort_by(|a, b| a.path.cmp(&b.path));
         plan.copy_b_to_a.sort_by(|a, b| a.path.cmp(&b.path));
-        plan.delete_a.sort_by(|a, b| a.path.cmp(&b.path));
-        plan.delete_b.sort_by(|a, b| a.path.cmp(&b.path));
+        sort_deletes(&mut plan.delete_a);
+        sort_deletes(&mut plan.delete_b);
 
         plan
+    }
+}
+
+fn sort_deletes(ops: &mut Vec<DeleteOp>) {
+    ops.sort_by(|a, b| {
+        let depth_a = delete_depth(&a.path);
+        let depth_b = delete_depth(&b.path);
+        depth_b.cmp(&depth_a).then_with(|| a.path.cmp(&b.path))
+    });
+}
+
+fn delete_depth(path: &str) -> usize {
+    path.split('/').filter(|seg| !seg.is_empty()).count()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn delete_order_children_before_parents() {
+        let mut ops = vec![
+            DeleteOp {
+                path: "a".to_string(),
+                kind: EntryKind::Dir,
+            },
+            DeleteOp {
+                path: "a/b".to_string(),
+                kind: EntryKind::Dir,
+            },
+            DeleteOp {
+                path: "a/b/c.txt".to_string(),
+                kind: EntryKind::File,
+            },
+            DeleteOp {
+                path: "x".to_string(),
+                kind: EntryKind::Dir,
+            },
+            DeleteOp {
+                path: "x/y".to_string(),
+                kind: EntryKind::File,
+            },
+        ];
+
+        sort_deletes(&mut ops);
+
+        let ordered: Vec<String> = ops.into_iter().map(|op| op.path).collect();
+        assert_eq!(
+            ordered,
+            vec![
+                "a/b/c.txt".to_string(),
+                "a/b".to_string(),
+                "x/y".to_string(),
+                "a".to_string(),
+                "x".to_string(),
+            ]
+        );
     }
 }

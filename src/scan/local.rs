@@ -106,12 +106,17 @@ impl<'a> LocalScanner<'a> {
                 continue;
             }
 
-            let kind = if meta.is_symlink() {
+            let file_type = meta.file_type();
+            let kind = if file_type.is_symlink() {
                 EntryKind::Symlink
-            } else if meta.is_dir() {
+            } else if file_type.is_dir() {
                 EntryKind::Dir
-            } else {
+            } else if file_type.is_file() {
                 EntryKind::File
+            } else {
+                let path_str = rel_path.to_string_lossy();
+                warn!("Skipping special file: {}", path_str);
+                continue;
             };
 
             let path_str = rel_path.to_string_lossy().replace('\\', "/");

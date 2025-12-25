@@ -15,6 +15,83 @@ pub enum RootType {
     Ssh,
 }
 
+pub fn parse_root_type(spec: &str) -> Result<RootType> {
+    let trimmed = spec.trim();
+    if trimmed.is_empty() {
+        anyhow::bail!("Root spec cannot be empty");
+    }
+
+    if trimmed.starts_with("ssh://") {
+        return Ok(RootType::Ssh);
+    }
+
+    if trimmed.starts_with('/') || trimmed.starts_with("./") || trimmed.starts_with("../") {
+        return Ok(RootType::Local);
+    }
+
+    if trimmed.starts_with("~") {
+        return Ok(RootType::Local);
+    }
+
+    if let Some((left, right)) = trimmed.split_once(':') {
+        let left = left.trim();
+        let right = right.trim();
+        if left.is_empty() || right.is_empty() {
+            anyhow::bail!("Invalid root spec: {}", spec);
+        }
+
+        if left.contains('/') || left.contains('\\') {
+            return Ok(RootType::Local);
+        }
+
+        if left.contains('@') {
+            return Ok(RootType::Ssh);
+        }
+
+        anyhow::bail!(
+            "Ambiguous root spec '{}'. Use ssh://host/path for remote or prefix './' for local paths containing ':'",
+            spec
+        );
+    }
+
+    Ok(RootType::Local)
+}
+
+pub fn root_from_spec(spec: &str) -> Result<Box<dyn Root>> {
+    match parse_root_type(spec)? {
+        RootType::Local => Ok(Box::new(LocalRoot::new(spec)?)),
+        RootType::Ssh => Ok(Box::new(SshRoot::new(spec)?)),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parse_root_type_prefers_explicit_ssh() {
+        assert_eq!(parse_root_type("ssh://host/path").unwrap(), RootType::Ssh);
+        assert_eq!(parse_root_type("user@host:/data").unwrap(), RootType::Ssh);
+    }
+
+    #[test]
+    fn parse_root_type_accepts_local_hints() {
+        assert_eq!(parse_root_type("./dir:sub").unwrap(), RootType::Local);
+        assert_eq!(parse_root_type("/abs:dir").unwrap(), RootType::Local);
+        assert_eq!(parse_root_type("dir/sub:thing").unwrap(), RootType::Local);
+        assert_eq!(parse_root_type("~/data").unwrap(), RootType::Local);
+    }
+
+    #[test]
+    fn parse_root_type_rejects_ambiguous_colon() {
+        let err = parse_root_type("host:path").unwrap_err();
+        assert!(
+            err.to_string().contains("Ambiguous root spec"),
+            "unexpected error: {err}"
+        );
+    }
+}
+
 #[derive(Debug, Clone, Default)]
 pub struct RemoteCaps {
     pub has_find_printf: bool,

@@ -123,6 +123,24 @@ mod tests {
         assert_eq!(root.port(), Some(2222));
         assert_eq!(root.path(), Path::new("/var/www"));
     }
+
+    #[test]
+    fn parse_sha256sum_zero_preserves_whitespace() {
+        let hash1 = "a".repeat(64);
+        let hash2 = "b".repeat(64);
+        let out = format!("{hash1}  ./ leading.txt\0{hash2}  trail.txt \0");
+        let map = parse_sha256sum_zero(out.as_bytes()).unwrap();
+        assert_eq!(map.get(" leading.txt"), Some(&hash1));
+        assert_eq!(map.get("trail.txt "), Some(&hash2));
+    }
+
+    #[test]
+    fn parse_sha256sum_text_preserves_whitespace() {
+        let hash = "c".repeat(64);
+        let out = format!("{hash}  ./ spaced .txt \n");
+        let map = parse_sha256sum_text(out.as_bytes()).unwrap();
+        assert_eq!(map.get(" spaced .txt "), Some(&hash));
+    }
 }
 
 impl Root for SshRoot {
@@ -306,53 +324,42 @@ impl Root for SshRoot {
             return Ok(Vec::new());
         }
 
-        // Construct command: cd root && sha256sum "path1" "path2" ...
         let root_str = self.root_path.to_string_lossy();
         let root_q = shell_quote(root_str.as_ref());
-        let mut cmd = format!("cd {root_q} && sha256sum --");
-
-        for path in paths {
-            // path is relative to root (from Entry)
-            // normalize_path returns it relative if default, which is good.
-            let p = self.normalize_path(path)?;
-            let p_q = shell_quote(p.to_string_lossy().as_ref());
-            cmd.push(' ');
-            cmd.push_str(&p_q);
-        }
-
-        let (out, _, code) = self.exec(&cmd)?;
-        if code != 0 {
-            anyhow::bail!("Remote hashing failed with code {}", code);
-        }
-
-        let out_str = String::from_utf8(out)?;
-        let mut hash_map = std::collections::HashMap::new();
-
-        for line in out_str.lines() {
-            // output usually: "hash  ./path" or "hash  path"
-            let parts: Vec<&str> = line.splitn(2, "  ").collect();
-            if parts.len() == 2 {
-                let h = parts[0].trim().to_string();
-                let p = parts[1].trim().to_string();
-                // strip leading ./ if any
-                let p_clean = p.strip_prefix("./").unwrap_or(&p).to_string();
-                hash_map.insert(p_clean, h);
+        let cmd_zero = build_sha256sum_cmd(&root_q, paths, true)?;
+        let (out, err, code) = self.exec(&cmd_zero)?;
+        let hash_map = if code == 0 {
+            parse_sha256sum_zero(&out)?
+        } else if should_fallback_sha256sum(&err) {
+            if paths
+                .iter()
+                .any(|p| p.to_string_lossy().contains('\n'))
+            {
+                anyhow::bail!(
+                    "Remote sha256sum does not support --zero; filenames with newlines cannot be hashed safely"
+                );
             }
-        }
+            let cmd_text = build_sha256sum_cmd(&root_q, paths, false)?;
+            let (out, err, code) = self.exec(&cmd_text)?;
+            if code != 0 {
+                anyhow::bail!(
+                    "Remote hashing failed: {}",
+                    String::from_utf8_lossy(&err)
+                );
+            }
+            parse_sha256sum_text(&out)?
+        } else {
+            anyhow::bail!(
+                "Remote hashing failed: {}",
+                String::from_utf8_lossy(&err)
+            );
+        };
 
-        // Reconstruct result vector
-        let mut result = Vec::new();
+        let mut result = Vec::with_capacity(paths.len());
         for path in paths {
             let p = self.normalize_path(path)?.to_string_lossy().to_string();
-            // Try strict match or match with ./ prefix?
-            // Since we CD'd and passed relative paths, output should match.
-            // But normalize_path returns what?
-            // If we passed "foo.txt", p is "foo.txt". output is "foo.txt".
-            // If hash_map has "foo.txt", great.
-
-            if let Some(h) = hash_map.get(&p) {
-                result.push(h.clone());
-            } else if let Some(h) = hash_map.get(&format!("./{}", p)) {
+            let key = p.strip_prefix("./").unwrap_or(&p);
+            if let Some(h) = hash_map.get(key) {
                 result.push(h.clone());
             } else {
                 anyhow::bail!("Missing hash for {}", p);
@@ -361,4 +368,69 @@ impl Root for SshRoot {
 
         Ok(result)
     }
+}
+
+fn build_sha256sum_cmd(root_q: &str, paths: &[PathBuf], zero: bool) -> Result<String> {
+    let mut cmd = if zero {
+        format!("cd {root_q} && sha256sum --zero --")
+    } else {
+        format!("cd {root_q} && sha256sum --")
+    };
+    for path in paths {
+        let p_q = shell_quote(path.to_string_lossy().as_ref());
+        cmd.push(' ');
+        cmd.push_str(&p_q);
+    }
+    Ok(cmd)
+}
+
+fn should_fallback_sha256sum(err: &[u8]) -> bool {
+    let msg = String::from_utf8_lossy(err).to_ascii_lowercase();
+    msg.contains("unrecognized option")
+        || msg.contains("unknown option")
+        || msg.contains("illegal option")
+        || msg.contains("invalid option")
+}
+
+fn parse_sha256sum_zero(out: &[u8]) -> Result<std::collections::HashMap<String, String>> {
+    let mut map = std::collections::HashMap::new();
+    for record in out.split(|b| *b == 0) {
+        if record.is_empty() {
+            continue;
+        }
+        let sep = find_double_space(record)
+            .ok_or_else(|| anyhow::anyhow!("Unexpected sha256sum --zero output"))?;
+        let hash = std::str::from_utf8(&record[..sep])?;
+        let path_bytes = &record[sep + 2..];
+        let mut path = String::from_utf8_lossy(path_bytes).to_string();
+        if let Some(stripped) = path.strip_prefix("./") {
+            path = stripped.to_string();
+        }
+        map.insert(path, hash.to_string());
+    }
+    Ok(map)
+}
+
+fn parse_sha256sum_text(out: &[u8]) -> Result<std::collections::HashMap<String, String>> {
+    let mut map = std::collections::HashMap::new();
+    let out_str = std::str::from_utf8(out)?;
+    for line in out_str.lines() {
+        if line.is_empty() {
+            continue;
+        }
+        let sep = line
+            .find("  ")
+            .ok_or_else(|| anyhow::anyhow!("Unexpected sha256sum output"))?;
+        let hash = &line[..sep];
+        let mut path = line[sep + 2..].to_string();
+        if let Some(stripped) = path.strip_prefix("./") {
+            path = stripped.to_string();
+        }
+        map.insert(path, hash.to_string());
+    }
+    Ok(map)
+}
+
+fn find_double_space(bytes: &[u8]) -> Option<usize> {
+    bytes.windows(2).position(|pair| pair == b"  ")
 }
