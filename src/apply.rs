@@ -1,6 +1,6 @@
 use crate::journal::{format_bytes, ExecutionStats, Journal, OpResult, Operation};
 use crate::plan::{CopyDirection, DeleteSide};
-use crate::progress;
+use crate::output::Console;
 use crate::roots::{EntryKind, Root, RootType, SshRoot};
 use crate::shell::{shell_quote, shell_quote_path};
 use crate::state::{CopyMetrics, PendingCopy, PendingDelete, StateDb};
@@ -27,6 +27,7 @@ pub struct Executor<'a> {
     copy_chunk: usize,
     delete_chunk: usize,
     behavior: CopyBehavior,
+    console: &'a Console,
 }
 
 impl<'a> Executor<'a> {
@@ -35,6 +36,7 @@ impl<'a> Executor<'a> {
         root_b: &'a dyn Root,
         db: &'a StateDb,
         behavior: CopyBehavior,
+        console: &'a Console,
     ) -> Self {
         Self {
             root_a,
@@ -43,6 +45,7 @@ impl<'a> Executor<'a> {
             copy_chunk: COPY_CHUNK,
             delete_chunk: DELETE_CHUNK,
             behavior,
+            console,
         }
     }
 
@@ -106,7 +109,7 @@ impl<'a> Executor<'a> {
         };
 
         let total_work = metrics.work_units.max(1);
-        let pb = create_progress_bar(total_work, label);
+        let pb = self.create_progress_bar(total_work, label);
         let mut bytes_done = 0u64;
         let mut entries_done = 0usize;
         let mut stream: Option<CopyStream> = None;
@@ -319,7 +322,7 @@ impl<'a> Executor<'a> {
         if total_entries == 0 {
             return Ok(());
         }
-        let pb = create_progress_bar(total_entries as u64, label);
+        let pb = self.create_progress_bar(total_entries as u64, label);
         let mut completed = 0usize;
         loop {
             let chunk = self.db.fetch_pending_deletes(side, self.delete_chunk)?;
@@ -381,8 +384,10 @@ impl<'a> Executor<'a> {
     }
 }
 
-fn create_progress_bar(total: u64, label: &str) -> ProgressBar {
-    progress::new_bar(total, label)
+impl<'a> Executor<'a> {
+    fn create_progress_bar(&self, total: u64, label: &str) -> ProgressBar {
+        self.console.progress_bar(total, label)
+    }
 }
 
 fn record_delete_success(

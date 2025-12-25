@@ -5,7 +5,6 @@ use std::io::{self, Read};
 use std::path::{Path, PathBuf};
 use std::process::{Child, ChildStdout, Command, Stdio};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
-use url::Url;
 
 #[derive(Clone)]
 pub struct SshRoot {
@@ -15,45 +14,30 @@ pub struct SshRoot {
 }
 
 impl SshRoot {
-    pub fn new(spec: &str) -> Result<Self> {
-        let url = Url::parse(spec)
-            .with_context(|| format!("Invalid SSH spec '{}', use ssh://user@host/path", spec))?;
-        Self::from_url(url)
-    }
-
-    #[cfg(test)]
-    pub fn user_host(&self) -> &str {
-        &self.user_host
-    }
-
-    #[cfg(test)]
-    pub fn port(&self) -> Option<u16> {
-        self.port
-    }
-
-    fn from_url(url: Url) -> Result<Self> {
-        if url.scheme() != "ssh" {
-            bail!("Invalid scheme for SSH root, expected 'ssh': {}", url);
+    pub fn from_parts(
+        user: Option<String>,
+        host: String,
+        port: Option<u16>,
+        path: PathBuf,
+    ) -> Result<Self> {
+        if host.trim().is_empty() {
+            bail!("Missing host in SSH spec");
         }
-
-        let host = url.host_str().context("Missing host in SSH URI")?;
-        let user = url.username();
-        let user_host = if !user.is_empty() {
-            format!("{}@{}", user, host)
-        } else {
-            host.to_string()
+        let user_host = match user {
+            Some(user) if !user.is_empty() => format!("{}@{}", user, host),
+            _ => host,
         };
-
-        let path_str = url.path();
-        let root_path = PathBuf::from(if path_str.is_empty() { "/" } else { path_str });
-
+        let root_path = if path.as_os_str().is_empty() {
+            PathBuf::from("/")
+        } else {
+            path
+        };
         Ok(Self {
             user_host,
-            port: url.port(),
+            port,
             root_path,
         })
     }
-
 
     pub(crate) fn ssh_command(&self) -> Command {
         let mut cmd = Command::new("ssh");
@@ -94,25 +78,6 @@ impl SshRoot {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn rejects_scp_like() {
-        let err = SshRoot::new("user@example.com:/data")
-            .err()
-            .expect("expected ssh:// error");
-        assert!(
-            err.to_string().contains("ssh://"),
-            "unexpected error: {err}"
-        );
-    }
-
-    #[test]
-    fn parses_url_with_port() {
-        let root = SshRoot::new("ssh://user@example.com:2222/var/www").unwrap();
-        assert_eq!(root.user_host(), "user@example.com");
-        assert_eq!(root.port(), Some(2222));
-        assert_eq!(root.path(), Path::new("/var/www"));
-    }
 
     #[test]
     fn parse_sha256sum_zero_preserves_whitespace() {

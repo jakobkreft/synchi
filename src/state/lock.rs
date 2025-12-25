@@ -47,8 +47,8 @@ fn register_active_lock(root: &dyn Root, path: &Path) -> usize {
     let cleanup_root = root.box_clone();
     let cleanup = Box::new(move || {
         if let Err(err) = cleanup_root.unlock(&path_buf) {
-            eprintln!(
-                "Warning: Failed to release lock at {}: {err}",
+            tracing::warn!(
+                "Failed to release lock at {}: {err}",
                 path_buf.display()
             );
         }

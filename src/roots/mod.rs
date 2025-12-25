@@ -1,7 +1,8 @@
-use anyhow::Result;
+use anyhow::{Context, Result};
 use std::io::Read;
 use std::path::{Path, PathBuf};
 use std::time::SystemTime;
+use url::Url;
 
 mod local;
 mod ssh;
@@ -15,53 +16,121 @@ pub enum RootType {
     Ssh,
 }
 
-pub fn parse_root_type(spec: &str) -> Result<RootType> {
-    let trimmed = spec.trim();
-    if trimmed.is_empty() {
-        anyhow::bail!("Root spec cannot be empty");
-    }
-
-    if trimmed.starts_with("ssh://") {
-        return Ok(RootType::Ssh);
-    }
-
-    if trimmed.starts_with('/') || trimmed.starts_with("./") || trimmed.starts_with("../") {
-        return Ok(RootType::Local);
-    }
-
-    if trimmed.starts_with("~") {
-        return Ok(RootType::Local);
-    }
-
-    if let Some((left, right)) = trimmed.split_once(':') {
-        let left = left.trim();
-        let right = right.trim();
-        if left.is_empty() || right.is_empty() {
-            anyhow::bail!("Invalid root spec: {}", spec);
-        }
-
-        if left.contains('/') || left.contains('\\') {
-            return Ok(RootType::Local);
-        }
-
-        if left.len() == 1 && right.starts_with('\\') {
-            return Ok(RootType::Local);
-        }
-
-        anyhow::bail!(
-            "SSH roots must use ssh://user@host/path. scp-style '{}' is not supported.",
-            spec
-        );
-    }
-
-    Ok(RootType::Local)
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum RootSpec {
+    Local {
+        path: PathBuf,
+    },
+    Ssh {
+        user: Option<String>,
+        host: String,
+        port: Option<u16>,
+        path: PathBuf,
+    },
 }
 
-pub fn root_from_spec(spec: &str) -> Result<Box<dyn Root>> {
-    match parse_root_type(spec)? {
-        RootType::Local => Ok(Box::new(LocalRoot::new(spec)?)),
-        RootType::Ssh => Ok(Box::new(SshRoot::new(spec)?)),
+impl RootSpec {
+    pub fn parse(spec: &str) -> Result<Self> {
+        let trimmed = spec.trim();
+        if trimmed.is_empty() {
+            anyhow::bail!("Root spec cannot be empty");
+        }
+
+        if trimmed.starts_with("ssh://") {
+            let url = Url::parse(trimmed)
+                .with_context(|| format!("Invalid SSH spec '{}', use ssh://user@host/path", spec))?;
+            if url.scheme() != "ssh" {
+                anyhow::bail!("Invalid SSH scheme: {}", url.scheme());
+            }
+            let host = url.host_str().context("Missing host in SSH spec")?.to_string();
+            let user = if url.username().is_empty() {
+                None
+            } else {
+                Some(url.username().to_string())
+            };
+            let path_str = url.path();
+            let path = if path_str.is_empty() {
+                PathBuf::from("/")
+            } else {
+                PathBuf::from(path_str)
+            };
+            return Ok(RootSpec::Ssh {
+                user,
+                host,
+                port: url.port(),
+                path,
+            });
+        }
+
+        if looks_like_scp(trimmed) {
+            anyhow::bail!(
+                "SSH roots must use ssh://user@host/path. scp-style '{}' is not supported.",
+                spec
+            );
+        }
+
+        Ok(RootSpec::Local {
+            path: PathBuf::from(trimmed),
+        })
     }
+
+    pub fn is_local(&self) -> bool {
+        matches!(self, RootSpec::Local { .. })
+    }
+
+    pub fn local_path(&self) -> Option<&Path> {
+        match self {
+            RootSpec::Local { path } => Some(path.as_path()),
+            _ => None,
+        }
+    }
+
+    pub fn display(&self) -> String {
+        match self {
+            RootSpec::Local { path } => path.to_string_lossy().to_string(),
+            RootSpec::Ssh {
+                user,
+                host,
+                port,
+                path,
+            } => {
+                let user_part = user.as_ref().map(|u| format!("{u}@")).unwrap_or_default();
+                let port_part = port.map(|p| format!(":{p}")).unwrap_or_default();
+                let path_str = path.to_string_lossy();
+                format!("ssh://{user_part}{host}{port_part}{path_str}")
+            }
+        }
+    }
+
+    pub fn root(&self) -> Result<Box<dyn Root>> {
+        match self {
+            RootSpec::Local { path } => Ok(Box::new(LocalRoot::new(path)?)),
+            RootSpec::Ssh {
+                user,
+                host,
+                port,
+                path,
+            } => Ok(Box::new(SshRoot::from_parts(
+                user.clone(),
+                host.clone(),
+                *port,
+                path.clone(),
+            )?)),
+        }
+    }
+}
+
+fn looks_like_scp(spec: &str) -> bool {
+    if let Some((left, right)) = spec.split_once(':') {
+        if left.contains('/') || left.contains('\\') {
+            return false;
+        }
+        if left.len() == 1 && right.starts_with('\\') {
+            return false;
+        }
+        return left.contains('@');
+    }
+    false
 }
 
 #[cfg(test)]
@@ -69,21 +138,34 @@ mod tests {
     use super::*;
 
     #[test]
-    fn parse_root_type_prefers_explicit_ssh() {
-        assert_eq!(parse_root_type("ssh://host/path").unwrap(), RootType::Ssh);
+    fn parse_root_spec_prefers_explicit_ssh() {
+        let spec = RootSpec::parse("ssh://user@host/path").unwrap();
+        assert!(matches!(spec, RootSpec::Ssh { .. }));
     }
 
     #[test]
-    fn parse_root_type_accepts_local_hints() {
-        assert_eq!(parse_root_type("./dir:sub").unwrap(), RootType::Local);
-        assert_eq!(parse_root_type("/abs:dir").unwrap(), RootType::Local);
-        assert_eq!(parse_root_type("dir/sub:thing").unwrap(), RootType::Local);
-        assert_eq!(parse_root_type("~/data").unwrap(), RootType::Local);
+    fn parse_root_spec_accepts_local() {
+        assert!(matches!(
+            RootSpec::parse("./dir:sub").unwrap(),
+            RootSpec::Local { .. }
+        ));
+        assert!(matches!(
+            RootSpec::parse("/abs:dir").unwrap(),
+            RootSpec::Local { .. }
+        ));
+        assert!(matches!(
+            RootSpec::parse("dir/sub:thing").unwrap(),
+            RootSpec::Local { .. }
+        ));
+        assert!(matches!(
+            RootSpec::parse("~/data").unwrap(),
+            RootSpec::Local { .. }
+        ));
     }
 
     #[test]
-    fn parse_root_type_rejects_scp_style() {
-        let err = parse_root_type("user@host:/data").unwrap_err();
+    fn parse_root_spec_rejects_scp_style() {
+        let err = RootSpec::parse("user@host:/data").unwrap_err();
         assert!(
             err.to_string().contains("ssh://"),
             "unexpected error: {err}"
