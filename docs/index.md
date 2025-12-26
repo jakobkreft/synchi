@@ -63,6 +63,8 @@ synchi sync
 * Remote roots are accessed over SSH
 * Standard tools must be available: `ssh`, `tar`, `find`, `sha256sum`
 
+`synchi status` is read-only. `synchi sync` prints the summary before touching either root and only writes during execution.
+
 Most Linux systems already meet these requirements.
 
 ## Documentation

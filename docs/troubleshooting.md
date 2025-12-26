@@ -24,10 +24,10 @@ If Synchi was interrupted or crashed, the lock file may be left behind.
 Fix:
 
 1. Make sure no other Synchi process is running.
-2. Remove the lock file manually:
+2. Remove the lock manually (it is a directory on SSH roots and a file on local roots):
 
 ```bash
-   rm /path/to/root_a/.synchi/state.lock
+   rm -rf /path/to/root_a/.synchi/<state_db_name>.lock
 ```
 
 3. Run Synchi again.
@@ -104,7 +104,7 @@ If you want to completely reset the tracked scope:
 
 * Use `-v` for more detailed output.
 * `synchi status` shows exactly what `synchi sync` would do.
-* Check `.synchi/journal.log` (if present) for recent activity.
+* Sync reports are printed to stdout after each run. Synchi does not persist a journal log file.
 
 ## Still stuck?
 

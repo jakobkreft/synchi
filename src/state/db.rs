@@ -1,7 +1,7 @@
 use crate::plan::{CopyDirection, DeleteOp, DeleteSide, Plan};
 use crate::roots::EntryKind;
 use anyhow::{Context, Result};
-use rusqlite::{params, params_from_iter, Connection, OptionalExtension};
+use rusqlite::{params, params_from_iter, Connection, OpenFlags, OptionalExtension};
 use std::path::Path;
 
 #[derive(Debug, Clone)]
@@ -53,6 +53,11 @@ impl StateDb {
         let db = Self { conn };
         db.init()?;
         Ok(db)
+    }
+
+    pub fn open_readonly(path: impl AsRef<Path>) -> Result<Self> {
+        let conn = Connection::open_with_flags(path, OpenFlags::SQLITE_OPEN_READ_ONLY)?;
+        Ok(Self { conn })
     }
 
     pub fn copy_metrics(&self, direction: CopyDirection) -> Result<CopyMetrics> {

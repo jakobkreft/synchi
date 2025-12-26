@@ -145,19 +145,13 @@ pub fn run(cli: Cli) -> Result<()> {
                 _ => anyhow::bail!("Root A must be a local path"),
             };
             let root_b = root_b_spec.root()?;
-            ensure_root_ready(&root_a)?;
-            ensure_root_ready(root_b.as_ref())?;
-            let lock_info = lock_info_string();
-            let lock_name = format!("{}.lock", db_filename);
-            let _lock_a = state::Lock::acquire(&root_a, &lock_name, &lock_info)?;
-            let _lock_b = state::Lock::acquire(root_b.as_ref(), &lock_name, &lock_info)?;
 
             let state_db_path = root_a.path().join(".synchi").join(&db_filename);
             if !state_db_path.exists() {
                 console.out("Not initialized. Run 'synchi init' first.")?;
                 return Ok(());
             }
-            let db = state::StateDb::open(&state_db_path)?;
+            let db = state::StateDb::open_readonly(&state_db_path)?;
             let state_entries = db.list_entries()?;
             let state_count = state_entries.len();
             let state_hint = state_count as u64;
@@ -325,19 +319,16 @@ pub fn run(cli: Cli) -> Result<()> {
                 _ => anyhow::bail!("Root A must be a local path"),
             };
             let root_b = root_b_spec.root()?;
-            ensure_root_ready(&root_a)?;
-            ensure_root_ready(root_b.as_ref())?;
-            let lock_info = lock_info_string();
-            let lock_name = format!("{}.lock", db_filename);
-            let _lock_a = state::Lock::acquire(&root_a, &lock_name, &lock_info)?;
-            let _lock_b = state::Lock::acquire(root_b.as_ref(), &lock_name, &lock_info)?;
-
             let state_db_path = root_a.path().join(".synchi").join(&db_filename);
-            std::fs::create_dir_all(state_db_path.parent().unwrap())?;
-            let db = state::StateDb::open(&state_db_path)?;
-            let state_snapshot = db.list_entries()?;
-            let state_hint = state_snapshot.len() as u64;
-            let state_map: HashMap<String, state::Entry> = state_snapshot
+            let state_entries = if state_db_path.exists() {
+                let db = state::StateDb::open_readonly(&state_db_path)?;
+                db.list_entries()?
+            } else {
+                Vec::new()
+            };
+            let state_count = state_entries.len();
+            let state_hint = state_count as u64;
+            let state_map: HashMap<String, state::Entry> = state_entries
                 .iter()
                 .map(|e| (e.path.clone(), e.clone()))
                 .collect();
@@ -431,11 +422,8 @@ pub fn run(cli: Cli) -> Result<()> {
                 config.hash_mode,
                 &console,
             )?;
-            if !*dry_run {
-                let scan_a_state: Vec<state::Entry> =
-                    scan_a.iter().map(ScanEntry::to_state).collect();
-                db.refresh_metadata(&scan_a_state)?;
-            }
+            let scan_a_state: Vec<state::Entry> =
+                scan_a.iter().map(ScanEntry::to_state).collect();
             hash_with_logging(
                 "Root B",
                 root_b.as_ref(),
@@ -444,9 +432,6 @@ pub fn run(cli: Cli) -> Result<()> {
                 config.hash_mode,
                 &console,
             )?;
-
-            let state_entries = db.list_entries()?;
-            let state_count = state_entries.len();
             let mut state_a = state_entries.clone();
             let mut state_b = state_entries;
             if !hardlink_skip.is_empty() {
@@ -592,6 +577,16 @@ pub fn run(cli: Cli) -> Result<()> {
                 }
                 console.out(&format!("Overall Duration: {:.2?}", overall_start.elapsed()))?;
             } else {
+                ensure_root_a_ready(&root_a)?;
+                let lock_info = lock_info_string();
+                let lock_name = format!("{}.lock", db_filename);
+                let _lock_a = state::Lock::acquire(&root_a, &lock_name, &lock_info)?;
+                ensure_root_b_marker(root_b.as_ref())?;
+
+                let state_db_path = root_a.path().join(".synchi").join(&db_filename);
+                std::fs::create_dir_all(state_db_path.parent().unwrap())?;
+                let db = state::StateDb::open(&state_db_path)?;
+                db.refresh_metadata(&scan_a_state)?;
                 db.queue_plan(&plan)?;
                 let mut journal = journal::Journal::new();
                 let copy_behavior = CopyBehavior {
@@ -838,11 +833,16 @@ fn print_status_summary(
     Ok(())
 }
 
-fn ensure_root_ready(root: &dyn roots::Root) -> Result<()> {
+fn ensure_root_a_ready(root: &dyn roots::Root) -> Result<()> {
     root.mkdirs(Path::new(".synchi"))?;
     let mut cursor = Cursor::new(Vec::from("synchi access check"));
     root.write_file(Path::new(".synchi/.access_check"), &mut cursor)?;
     let _ = root.remove_file(Path::new(".synchi/.access_check"));
+    Ok(())
+}
+
+fn ensure_root_b_marker(root: &dyn roots::Root) -> Result<()> {
+    root.mkdirs(Path::new(".synchi"))?;
     Ok(())
 }
 
