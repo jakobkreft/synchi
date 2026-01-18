@@ -340,7 +340,11 @@ impl StateDb {
         insert_pending_delete_conn(&self.conn, side, op)
     }
 
-    fn insert_pending_link(&self, direction: CopyDirection, link: &crate::plan::LinkOp) -> Result<()> {
+    fn insert_pending_link(
+        &self,
+        direction: CopyDirection,
+        link: &crate::plan::LinkOp,
+    ) -> Result<()> {
         insert_pending_link_conn(&self.conn, direction, link)
     }
 
@@ -660,7 +664,11 @@ fn kind_to_int(kind: EntryKind) -> i32 {
     }
 }
 
-fn insert_pending_copy_conn(conn: &Connection, direction: CopyDirection, entry: &Entry) -> Result<()> {
+fn insert_pending_copy_conn(
+    conn: &Connection,
+    direction: CopyDirection,
+    entry: &Entry,
+) -> Result<()> {
     conn.execute(
         "INSERT INTO pending_copy_ops
             (direction, path, kind, size, mtime, mode, hash, link_target)

@@ -35,11 +35,7 @@ mod tests {
 }
 
 impl<'a> RemoteScanner<'a> {
-    pub fn new(
-        root: &'a SshRoot,
-        filter: &'a Filter,
-        caps: RemoteCaps,
-    ) -> Self {
+    pub fn new(root: &'a SshRoot, filter: &'a Filter, caps: RemoteCaps) -> Self {
         Self { root, filter, caps }
     }
 

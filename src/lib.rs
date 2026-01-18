@@ -24,12 +24,12 @@ mod state;
 mod transport;
 mod ui;
 
+use crate::cli::Commands;
+use crate::scan::Entry as ScanEntry;
 pub use cli::Cli;
 use output::Console;
 use roots::{Root, RootSpec};
 use transport::CopyBehavior;
-use crate::cli::Commands;
-use crate::scan::Entry as ScanEntry;
 
 pub fn run(cli: Cli) -> Result<()> {
     install_signal_handler();
@@ -77,18 +77,15 @@ pub fn run(cli: Cli) -> Result<()> {
         config.state_db_name = Some(name);
     }
 
-    let root_a_spec = config
-        .root_a
-        .as_deref()
-        .map(RootSpec::parse)
-        .transpose()?;
-    let root_b_spec = config
-        .root_b
-        .as_deref()
-        .map(RootSpec::parse)
-        .transpose()?;
+    let root_a_spec = config.root_a.as_deref().map(RootSpec::parse).transpose()?;
+    let root_b_spec = config.root_b.as_deref().map(RootSpec::parse).transpose()?;
 
-    print_effective_config(&config, root_a_spec.as_ref(), root_b_spec.as_ref(), &mut console)?;
+    print_effective_config(
+        &config,
+        root_a_spec.as_ref(),
+        root_b_spec.as_ref(),
+        &mut console,
+    )?;
 
     match &cli.command {
         Commands::Init => {
@@ -187,14 +184,15 @@ pub fn run(cli: Cli) -> Result<()> {
                 let label_b = format!("Root B ({})", ssh_root.path().display());
                 info!("Scanning {}", label_b);
                 if !matches!(hardlink_mode, config::HardlinkMode::Copy) && !caps.has_find_inode {
-                    anyhow::bail!(
-                        "Hardlink modes require remote `find` with %D/%i support"
-                    );
+                    anyhow::bail!("Hardlink modes require remote `find` with %D/%i support");
                 }
                 run_scan_with_progress(
                     &label_b,
                     Some(state_hint),
-                    |pb| scan::RemoteScanner::new(ssh_root, &filter, caps).scan_with_progress(Some(pb)),
+                    |pb| {
+                        scan::RemoteScanner::new(ssh_root, &filter, caps)
+                            .scan_with_progress(Some(pb))
+                    },
                     &console,
                 )?
             } else {
@@ -361,14 +359,15 @@ pub fn run(cli: Cli) -> Result<()> {
                 let label_b = format!("Root B ({})", ssh_root.path().display());
                 info!("Scanning {}", label_b);
                 if !matches!(hardlink_mode, config::HardlinkMode::Copy) && !caps.has_find_inode {
-                    anyhow::bail!(
-                        "Hardlink modes require remote `find` with %D/%i support"
-                    );
+                    anyhow::bail!("Hardlink modes require remote `find` with %D/%i support");
                 }
                 run_scan_with_progress(
                     &label_b,
                     Some(state_hint),
-                    |pb| scan::RemoteScanner::new(ssh_root, &filter, caps).scan_with_progress(Some(pb)),
+                    |pb| {
+                        scan::RemoteScanner::new(ssh_root, &filter, caps)
+                            .scan_with_progress(Some(pb))
+                    },
                     &console,
                 )?
             } else if let Some(local_b) = root_b.as_any().downcast_ref::<roots::LocalRoot>() {
@@ -422,8 +421,7 @@ pub fn run(cli: Cli) -> Result<()> {
                 config.hash_mode,
                 &console,
             )?;
-            let scan_a_state: Vec<state::Entry> =
-                scan_a.iter().map(ScanEntry::to_state).collect();
+            let scan_a_state: Vec<state::Entry> = scan_a.iter().map(ScanEntry::to_state).collect();
             hash_with_logging(
                 "Root B",
                 root_b.as_ref(),
@@ -507,7 +505,11 @@ pub fn run(cli: Cli) -> Result<()> {
             )?;
             apply_policy_to_diffs(&mut diffs, &policy)?;
 
-            let diffs_for_links = if preserve_mode { Some(diffs.clone()) } else { None };
+            let diffs_for_links = if preserve_mode {
+                Some(diffs.clone())
+            } else {
+                None
+            };
             let mut plan = plan::PlanBuilder::build(diffs);
 
             if preserve_mode {
@@ -544,7 +546,10 @@ pub fn run(cli: Cli) -> Result<()> {
                 for del in &plan.delete_a {
                     console.out(&format!("Delete in A {}", del.path))?;
                 }
-                console.out(&format!("Overall Duration: {:.2?}", overall_start.elapsed()))?;
+                console.out(&format!(
+                    "Overall Duration: {:.2?}",
+                    overall_start.elapsed()
+                ))?;
             } else {
                 ensure_root_a_ready(&root_a)?;
                 let lock_info = lock_info_string();
@@ -562,13 +567,8 @@ pub fn run(cli: Cli) -> Result<()> {
                     preserve_owner: config.preserve_owner,
                     preserve_permissions: config.preserve_permissions,
                 };
-                let executor = apply::Executor::new(
-                    &root_a,
-                    root_b.as_ref(),
-                    &db,
-                    copy_behavior,
-                    &console,
-                );
+                let executor =
+                    apply::Executor::new(&root_a, root_b.as_ref(), &db, copy_behavior, &console);
                 match executor.execute(total_ops, &mut journal) {
                     Ok(stats) => {
                         journal.set_stats(stats);
@@ -991,7 +991,11 @@ fn prompt_copy_policy(label: &str, paths: &[String], console: &mut Console) -> R
     }
 }
 
-fn prompt_delete_policy(label: &str, paths: &[String], console: &mut Console) -> Result<DeletePolicy> {
+fn prompt_delete_policy(
+    label: &str,
+    paths: &[String],
+    console: &mut Console,
+) -> Result<DeletePolicy> {
     loop {
         console.out_raw(&format!(
             "Action for {label}? [d]elete [r]estore [s]kip [l]ist [h]elp (default: s): "

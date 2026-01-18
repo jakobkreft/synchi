@@ -1,7 +1,7 @@
 use super::*;
 use crate::roots::EntryKind;
-use crate::scan::Filter;
 use crate::scan::Entry as ScanEntry;
+use crate::scan::Filter;
 use crate::state::Entry as StateEntry;
 
 fn scan_entry(path: &str, mtime: i64) -> ScanEntry {

@@ -8,8 +8,8 @@ use std::sync::{
     atomic::{AtomicU64, Ordering},
     Arc,
 };
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use std::thread::JoinHandle;
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use tracing::debug;
 
 #[derive(Clone, Copy)]
@@ -177,7 +177,9 @@ impl TarStream {
         let (mut pack_child, pack_stdin, pack_stdout, pack_stderr) =
             spawn_tar_pack(src_root).context("launching tar pack on source root")?;
         let (unpack_child, unpack_stdin, unpack_stderr) =
-            match spawn_tar_unpack(dest_root, behavior).context("launching tar unpack on destination root") {
+            match spawn_tar_unpack(dest_root, behavior)
+                .context("launching tar unpack on destination root")
+            {
                 Ok(result) => result,
                 Err(err) => {
                     let _ = pack_child.kill();

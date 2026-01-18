@@ -70,9 +70,7 @@ pub fn hardlink_groups(entries: &[Entry]) -> HardlinkGroups {
 
 pub fn has_missing_inode(entries: &[Entry]) -> bool {
     entries.iter().any(|entry| {
-        entry.kind == EntryKind::File
-            && entry.nlink > 1
-            && (entry.dev == 0 || entry.inode == 0)
+        entry.kind == EntryKind::File && entry.nlink > 1 && (entry.dev == 0 || entry.inode == 0)
     })
 }
 

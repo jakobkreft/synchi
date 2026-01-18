@@ -135,14 +135,10 @@ pub fn apply_hardlink_preserve(
         .map(|entry| (entry.path.as_str(), entry))
         .collect::<HashMap<_, _>>();
 
-    let mut copy_a_set: HashSet<String> =
-        plan.copy_a_to_b.iter().map(|e| e.path.clone()).collect();
-    let mut copy_b_set: HashSet<String> =
-        plan.copy_b_to_a.iter().map(|e| e.path.clone()).collect();
-    let delete_a_set: HashSet<String> =
-        plan.delete_a.iter().map(|e| e.path.clone()).collect();
-    let delete_b_set: HashSet<String> =
-        plan.delete_b.iter().map(|e| e.path.clone()).collect();
+    let mut copy_a_set: HashSet<String> = plan.copy_a_to_b.iter().map(|e| e.path.clone()).collect();
+    let mut copy_b_set: HashSet<String> = plan.copy_b_to_a.iter().map(|e| e.path.clone()).collect();
+    let delete_a_set: HashSet<String> = plan.delete_a.iter().map(|e| e.path.clone()).collect();
+    let delete_b_set: HashSet<String> = plan.delete_b.iter().map(|e| e.path.clone()).collect();
 
     if allow_copy_a_to_b {
         apply_hardlink_direction(
@@ -170,10 +166,8 @@ pub fn apply_hardlink_preserve(
 
     plan.copy_a_to_b.sort_by(|a, b| a.path.cmp(&b.path));
     plan.copy_b_to_a.sort_by(|a, b| a.path.cmp(&b.path));
-    plan.hardlink_a_to_b
-        .sort_by(|a, b| a.path.cmp(&b.path));
-    plan.hardlink_b_to_a
-        .sort_by(|a, b| a.path.cmp(&b.path));
+    plan.hardlink_a_to_b.sort_by(|a, b| a.path.cmp(&b.path));
+    plan.hardlink_b_to_a.sort_by(|a, b| a.path.cmp(&b.path));
 }
 
 fn apply_hardlink_direction(
@@ -235,10 +229,12 @@ fn apply_hardlink_direction(
     if !remove_copy.is_empty() {
         match direction {
             CopyDirection::AtoB => {
-                plan.copy_a_to_b.retain(|entry| !remove_copy.contains(&entry.path));
+                plan.copy_a_to_b
+                    .retain(|entry| !remove_copy.contains(&entry.path));
             }
             CopyDirection::BtoA => {
-                plan.copy_b_to_a.retain(|entry| !remove_copy.contains(&entry.path));
+                plan.copy_b_to_a
+                    .retain(|entry| !remove_copy.contains(&entry.path));
             }
         }
     }

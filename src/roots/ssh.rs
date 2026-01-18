@@ -246,10 +246,7 @@ impl Root for SshRoot {
         let mut cmd = self.ssh_command();
         cmd.arg(format!("cat -- {abs_path_q}"));
 
-        let mut child = cmd
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped())
-            .spawn()?;
+        let mut child = cmd.stdout(Stdio::piped()).stderr(Stdio::piped()).spawn()?;
         let stdout = child.stdout.take().context("Failed to open stdout")?;
         let stderr = child.stderr.take().context("Failed to open stderr")?;
         let stderr_handle = std::thread::spawn(move || {
@@ -324,7 +321,9 @@ impl Root for SshRoot {
             self.exec_checked(&format!("mkdir -p -- {parent_q}"))?;
         }
         let target_q = shell_quote(target);
-        self.exec_checked(&format!("rm -f -- {abs_path_q} && ln -s -- {target_q} {abs_path_q}"))?;
+        self.exec_checked(&format!(
+            "rm -f -- {abs_path_q} && ln -s -- {target_q} {abs_path_q}"
+        ))?;
         Ok(())
     }
 
@@ -381,10 +380,7 @@ impl Root for SshRoot {
         let hash_map = if code == 0 {
             parse_sha256sum_zero(&out)?
         } else if should_fallback_sha256sum(&err) {
-            if paths
-                .iter()
-                .any(|p| p.to_string_lossy().contains('\n'))
-            {
+            if paths.iter().any(|p| p.to_string_lossy().contains('\n')) {
                 anyhow::bail!(
                     "Remote sha256sum does not support --zero; filenames with newlines cannot be hashed safely"
                 );
@@ -392,17 +388,11 @@ impl Root for SshRoot {
             let cmd_text = build_sha256sum_cmd(&root_q, paths, false)?;
             let (out, err, code) = self.exec(&cmd_text)?;
             if code != 0 {
-                anyhow::bail!(
-                    "Remote hashing failed: {}",
-                    String::from_utf8_lossy(&err)
-                );
+                anyhow::bail!("Remote hashing failed: {}", String::from_utf8_lossy(&err));
             }
             parse_sha256sum_text(&out)?
         } else {
-            anyhow::bail!(
-                "Remote hashing failed: {}",
-                String::from_utf8_lossy(&err)
-            );
+            anyhow::bail!("Remote hashing failed: {}", String::from_utf8_lossy(&err));
         };
 
         let mut result = Vec::with_capacity(paths.len());

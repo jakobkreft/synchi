@@ -126,5 +126,3 @@ pub enum DeletePolicyArg {
     Restore,
     Skip,
 }
-
- 

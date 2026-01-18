@@ -1,8 +1,8 @@
 #[cfg(test)]
 mod tests {
+    use crate::roots::EntryKind;
     use crate::scan::filter::{Filter, ScanTargets};
     use crate::scan::{hardlink_groups, Entry};
-    use crate::roots::EntryKind;
     use std::path::{Path, PathBuf};
 
     #[test]

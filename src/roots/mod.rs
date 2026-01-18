@@ -37,12 +37,16 @@ impl RootSpec {
         }
 
         if trimmed.starts_with("ssh://") {
-            let url = Url::parse(trimmed)
-                .with_context(|| format!("Invalid SSH spec '{}', use ssh://user@host/path", spec))?;
+            let url = Url::parse(trimmed).with_context(|| {
+                format!("Invalid SSH spec '{}', use ssh://user@host/path", spec)
+            })?;
             if url.scheme() != "ssh" {
                 anyhow::bail!("Invalid SSH scheme: {}", url.scheme());
             }
-            let host = url.host_str().context("Missing host in SSH spec")?.to_string();
+            let host = url
+                .host_str()
+                .context("Missing host in SSH spec")?
+                .to_string();
             let user = if url.username().is_empty() {
                 None
             } else {

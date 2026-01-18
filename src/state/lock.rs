@@ -47,10 +47,7 @@ fn register_active_lock(root: &dyn Root, path: &Path) -> usize {
     let cleanup_root = root.box_clone();
     let cleanup = Box::new(move || {
         if let Err(err) = cleanup_root.unlock(&path_buf) {
-            tracing::warn!(
-                "Failed to release lock at {}: {err}",
-                path_buf.display()
-            );
+            tracing::warn!("Failed to release lock at {}: {err}", path_buf.display());
         }
     });
     let mut registry = lock_registry().lock().unwrap();

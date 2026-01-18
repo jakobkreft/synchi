@@ -1,6 +1,6 @@
 use crate::journal::{format_bytes, ExecutionStats, Journal, OpResult, Operation};
-use crate::plan::{CopyDirection, DeleteSide};
 use crate::output::Console;
+use crate::plan::{CopyDirection, DeleteSide};
 use crate::roots::{EntryKind, Root, RootType, SshRoot};
 use crate::shell::{shell_quote, shell_quote_path};
 use crate::state::{CopyMetrics, PendingCopy, PendingDelete, PendingLink, StateDb};
@@ -64,12 +64,7 @@ impl<'a> Executor<'a> {
         )?;
 
         let links_ab = self.db.pending_link_count(CopyDirection::AtoB)?;
-        self.process_links(
-            CopyDirection::AtoB,
-            "Link A → B",
-            links_ab,
-            journal,
-        )?;
+        self.process_links(CopyDirection::AtoB, "Link A → B", links_ab, journal)?;
 
         let metrics_ba = self.db.copy_metrics(CopyDirection::BtoA)?;
         self.process_copy_direction(
@@ -81,12 +76,7 @@ impl<'a> Executor<'a> {
         )?;
 
         let links_ba = self.db.pending_link_count(CopyDirection::BtoA)?;
-        self.process_links(
-            CopyDirection::BtoA,
-            "Link B → A",
-            links_ba,
-            journal,
-        )?;
+        self.process_links(CopyDirection::BtoA, "Link B → A", links_ba, journal)?;
 
         let delete_a = self.db.pending_delete_count(DeleteSide::RootA)?;
         self.process_deletes(
@@ -162,13 +152,8 @@ impl<'a> Executor<'a> {
                 break;
             }
 
-            let progress = self.send_copy_chunk(
-                &mut stream,
-                direction,
-                &chunk,
-                stats,
-                &mut chunk_records,
-            );
+            let progress =
+                self.send_copy_chunk(&mut stream, direction, &chunk, stats, &mut chunk_records);
             let progress = if streaming {
                 match progress {
                     Ok(progress) => {
@@ -176,7 +161,12 @@ impl<'a> Executor<'a> {
                         progress
                     }
                     Err(err) => {
-                        record_stream_failures(journal, &mut deferred_ops, &mut chunk_records, &err);
+                        record_stream_failures(
+                            journal,
+                            &mut deferred_ops,
+                            &mut chunk_records,
+                            &err,
+                        );
                         return Err(err);
                     }
                 }
@@ -224,10 +214,7 @@ impl<'a> Executor<'a> {
         }
 
         if streaming {
-            if let Err(err) = stream
-                .finish()
-                .context("finalizing streaming copy session")
-            {
+            if let Err(err) = stream.finish().context("finalizing streaming copy session") {
                 record_stream_finish_failures(journal, &mut deferred_ops, &err);
                 return Err(err);
             }
@@ -871,8 +858,7 @@ mod tests {
             },
         ];
 
-        let (rm_cmd, rmdir_cmd) =
-            build_remote_delete_commands(Path::new("/root"), &deletes);
+        let (rm_cmd, rmdir_cmd) = build_remote_delete_commands(Path::new("/root"), &deletes);
 
         let rm_cmd = rm_cmd.expect("rm command");
         let rmdir_cmd = rmdir_cmd.expect("rmdir command");
