@@ -48,18 +48,18 @@ pub enum Commands {
         /// Automatically allow all categories (overridden by specific flags)
         #[arg(short = 'y', long = "yes")]
         auto_yes: bool,
-        /// Automatically allow or deny copying A → B for this run
+        /// Copy A → B policy for this run
         #[arg(long, value_enum)]
-        copy_a_to_b: Option<AllowArg>,
-        /// Automatically allow or deny copying B → A for this run
+        copy_a_to_b: Option<CopyPolicyArg>,
+        /// Copy B → A policy for this run
         #[arg(long, value_enum)]
-        copy_b_to_a: Option<AllowArg>,
-        /// Automatically allow or deny propagating deletes to Root A
+        copy_b_to_a: Option<CopyPolicyArg>,
+        /// Delete on A policy for this run
         #[arg(long, value_enum)]
-        delete_on_a: Option<AllowArg>,
-        /// Automatically allow or deny propagating deletes to Root B
+        delete_on_a: Option<DeletePolicyArg>,
+        /// Delete on B policy for this run
         #[arg(long, value_enum)]
-        delete_on_b: Option<AllowArg>,
+        delete_on_b: Option<DeletePolicyArg>,
     },
     /// Show status/diff without syncing
     Status,
@@ -115,13 +115,16 @@ impl ForceArg {
 }
 
 #[derive(Clone, Copy, Debug, ValueEnum)]
-pub enum AllowArg {
-    Yes,
-    No,
+pub enum CopyPolicyArg {
+    Allow,
+    Skip,
 }
 
-impl AllowArg {
-    pub fn as_bool(self) -> bool {
-        matches!(self, AllowArg::Yes)
-    }
+#[derive(Clone, Copy, Debug, ValueEnum)]
+pub enum DeletePolicyArg {
+    Delete,
+    Restore,
+    Skip,
 }
+
+ 

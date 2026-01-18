@@ -64,19 +64,34 @@ synchi sync --root-a ./folderA --root-b ssh://user@host:8022/remote/path
 Root A always holds `.synchi` and the SQLite database, so it must be writable.
 `synchi status` is read-only, and `synchi sync` prints the summary before touching either root. During execution, Synchi creates a `.synchi` marker directory on root B to confirm write access.
 
-Each `synchi sync` run prints the same status summary as `synchi status` before touching either root. Synchi then prompts for every category that still has pending work—`Copy A → B`, `Copy B → A`, `Delete on A`, and `Delete on B`. Answer `y`/`n` per category, type `dry` to list the pending items before deciding, pass `-y/--yes` to auto-approve all unanswered categories, or use the explicit flags below to pre-decide:
+Each `synchi sync` run prints the same status summary as `synchi status` before touching either root. Synchi then prompts for every category that still has pending work—`Copy A → B`, `Copy B → A`, `Delete on A`, and `Delete on B`. Answer `y`/`n` for copy categories, and `d`/`r`/`s` for delete categories. Use `l` to list pending paths, pass `-y/--yes` to auto-approve all unanswered categories, or use the explicit flags below to pre-decide:
 
 ```
---copy-a-to-b yes|no
---copy-b-to-a yes|no
---delete-on-a yes|no
---delete-on-b yes|no
+--copy-a-to-b allow|skip
+--copy-b-to-a allow|skip
+--delete-on-a delete|restore|skip
+--delete-on-b delete|restore|skip
 ```
 
 Combine these with `--dry-run` when you only want the summary without executing anything.
 
 
 Run `synchi sync --help` for more info about options.
+
+### Data Safety
+
+Synchi is designed to be predictable, but it can delete or overwrite data if you approve those actions.
+
+Safe by default:
+- `synchi status` is read-only.
+- `--dry-run` shows exactly what would happen.
+- Sync prompts for each category unless you pre-approve or use `--yes`.
+
+Destructive actions:
+- Deletes happen only when you choose `delete` for a delete category.
+- `force = "root_a"` or `"root_b"` will mirror one side, which can remove data on the other side.
+
+When in doubt, run `synchi status` or `synchi sync --dry-run` first and keep a separate backup.
 
 ### Synchi Workflow
 
@@ -104,7 +119,7 @@ Only genuinely new or changed files are transferred, making syncing efficient an
 | `preserve_permissions` | Default `true`. When `false`, Synchi skips `chmod`/`touch` steps and omits `--preserve-permissions`, letting the destination filesystem assign modes/mtimes. |
 | `state_db_name` | Optional label inside `.synchi/` for the state database. Synchi appends `.db`, so `project` becomes `.synchi/project.db` (default `state.db`). |
 
-All options can also be overridden via CLI flags (e.g., `--root-a`, `--root-b`, `--hardlinks`, `--hash-mode`, `--force root_a`, `--state-db-name archive`, `--dry-run`, `-y`, `--copy-a-to-b no`).
+All options can also be overridden via CLI flags (e.g., `--root-a`, `--root-b`, `--hardlinks`, `--hash-mode`, `--force root_a`, `--state-db-name archive`, `--dry-run`, `-y`, `--copy-a-to-b skip`).
 
 Create your own config file `config.toml`
 

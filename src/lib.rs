@@ -452,11 +452,6 @@ pub fn run(cli: Cli) -> Result<()> {
             };
 
             let mut diffs = diff::DiffEngine::diff(scan_a, state_a, scan_b, state_b, &filter);
-            let diffs_for_links = if preserve_mode {
-                Some(diffs.clone())
-            } else {
-                None
-            };
 
             if let Some(force_side) = config.force_side()? {
                 match force_side {
@@ -480,73 +475,47 @@ pub fn run(cli: Cli) -> Result<()> {
                 &mut console,
             )?;
 
-            let mut plan = plan::PlanBuilder::build(diffs);
-
-            if !plan.conflicts.is_empty() {
-                console.out(&format!("Found {} conflicts.", plan.conflicts.len()))?;
+            let conflict_count = diffs
+                .iter()
+                .filter(|diff| matches!(diff.action, diff::SyncAction::Conflict(_)))
+                .count();
+            if conflict_count > 0 {
+                console.out(&format!("Found {} conflicts.", conflict_count))?;
                 if *dry_run {
                     console.out("Dry run: Skipping conflict resolution.")?;
                 } else {
-                    plan = ui::Ui::resolve_conflicts(plan)?;
+                    let conflicts: Vec<diff::DiffResult> = diffs
+                        .iter()
+                        .filter(|diff| matches!(diff.action, diff::SyncAction::Conflict(_)))
+                        .cloned()
+                        .collect();
+                    let decisions = ui::Ui::resolve_conflicts(conflicts)?;
+                    apply_conflict_decisions(&mut diffs, &decisions);
                 }
             }
 
-            let copy_a_to_b_choice = (*copy_a_to_b).map(|val| val.as_bool());
-            let allow_copy_a_to_b = resolve_category_setting(
-                copy_a_to_b_choice,
-                "Copy A → B",
-                PendingView::copy(&plan.copy_a_to_b),
+            let pending = PendingSets::from_diffs(&diffs);
+            let policy = collect_policy(
+                &pending,
+                *copy_a_to_b,
+                *copy_b_to_a,
+                *delete_on_a,
+                *delete_on_b,
                 *dry_run,
                 *auto_yes,
                 &mut console,
             )?;
-            if !allow_copy_a_to_b {
-                plan.copy_a_to_b.clear();
-            }
+            apply_policy_to_diffs(&mut diffs, &policy)?;
 
-            let copy_b_to_a_choice = (*copy_b_to_a).map(|val| val.as_bool());
-            let allow_copy_b_to_a = resolve_category_setting(
-                copy_b_to_a_choice,
-                "Copy B → A",
-                PendingView::copy(&plan.copy_b_to_a),
-                *dry_run,
-                *auto_yes,
-                &mut console,
-            )?;
-            if !allow_copy_b_to_a {
-                plan.copy_b_to_a.clear();
-            }
-
-            let delete_on_a_choice = (*delete_on_a).map(|val| val.as_bool());
-            let allow_delete_on_a = resolve_category_setting(
-                delete_on_a_choice,
-                "Delete on A",
-                PendingView::delete(&plan.delete_a),
-                *dry_run,
-                *auto_yes,
-                &mut console,
-            )?;
-            if !allow_delete_on_a {
-                plan.delete_a.clear();
-            }
-
-            let delete_on_b_choice = (*delete_on_b).map(|val| val.as_bool());
-            let allow_delete_on_b = resolve_category_setting(
-                delete_on_b_choice,
-                "Delete on B",
-                PendingView::delete(&plan.delete_b),
-                *dry_run,
-                *auto_yes,
-                &mut console,
-            )?;
-            if !allow_delete_on_b {
-                plan.delete_b.clear();
-            }
+            let diffs_for_links = if preserve_mode { Some(diffs.clone()) } else { None };
+            let mut plan = plan::PlanBuilder::build(diffs);
 
             if preserve_mode {
                 if let (Some(groups_a), Some(groups_b)) =
                     (hardlink_groups_a.as_ref(), hardlink_groups_b.as_ref())
                 {
+                    let allow_copy_a_to_b = policy.copy_a_to_b == CopyPolicy::Allow;
+                    let allow_copy_b_to_a = policy.copy_b_to_a == CopyPolicy::Allow;
                     plan::apply_hardlink_preserve(
                         &mut plan,
                         diffs_for_links.as_ref().unwrap(),
@@ -771,6 +740,18 @@ fn apply_force_mirror(diffs: &mut [diff::DiffResult], side: config::ForceSide) {
     }
 }
 
+fn apply_conflict_decisions(diffs: &mut [diff::DiffResult], decisions: &[ui::ConflictDecision]) {
+    let decision_map: HashMap<&str, diff::SyncAction> = decisions
+        .iter()
+        .map(|d| (d.path.as_str(), d.action.clone()))
+        .collect();
+    for diff in diffs {
+        if let Some(action) = decision_map.get(diff.path.as_str()) {
+            diff.action = action.clone();
+        }
+    }
+}
+
 #[derive(Default)]
 struct PendingSummary {
     copy_a_to_b: usize,
@@ -846,98 +827,337 @@ fn ensure_root_b_marker(root: &dyn roots::Root) -> Result<()> {
     Ok(())
 }
 
-enum PendingView<'a> {
-    Copy(&'a [state::Entry]),
-    Delete(&'a [plan::DeleteOp]),
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum CopyPolicy {
+    Allow,
+    Skip,
 }
 
-impl<'a> PendingView<'a> {
-    fn copy(entries: &'a [state::Entry]) -> Option<Self> {
-        if entries.is_empty() {
-            None
-        } else {
-            Some(Self::Copy(entries))
-        }
-    }
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum DeletePolicy {
+    Delete,
+    Restore,
+    Skip,
+}
 
-    fn delete(entries: &'a [plan::DeleteOp]) -> Option<Self> {
-        if entries.is_empty() {
-            None
-        } else {
-            Some(Self::Delete(entries))
-        }
-    }
+struct Policy {
+    copy_a_to_b: CopyPolicy,
+    copy_b_to_a: CopyPolicy,
+    delete_on_a: DeletePolicy,
+    delete_on_b: DeletePolicy,
+}
 
-    fn len(&self) -> usize {
-        match self {
-            PendingView::Copy(entries) => entries.len(),
-            PendingView::Delete(entries) => entries.len(),
-        }
-    }
+struct PendingSets {
+    copy_a_to_b: Vec<String>,
+    copy_b_to_a: Vec<String>,
+    delete_a: Vec<String>,
+    delete_b: Vec<String>,
+}
 
-    fn print(&self, label: &str, console: &mut Console) -> Result<()> {
-        match self {
-            PendingView::Copy(entries) => {
-                for entry in *entries {
-                    console.out(&format!("{} {}", label, entry.path))?;
-                }
+impl PendingSets {
+    fn from_diffs(diffs: &[diff::DiffResult]) -> Self {
+        let mut pending = Self {
+            copy_a_to_b: Vec::new(),
+            copy_b_to_a: Vec::new(),
+            delete_a: Vec::new(),
+            delete_b: Vec::new(),
+        };
+        for diff in diffs {
+            match diff.action {
+                diff::SyncAction::CopyAtoB => pending.copy_a_to_b.push(diff.path.clone()),
+                diff::SyncAction::CopyBtoA => pending.copy_b_to_a.push(diff.path.clone()),
+                diff::SyncAction::DeleteA => pending.delete_a.push(diff.path.clone()),
+                diff::SyncAction::DeleteB => pending.delete_b.push(diff.path.clone()),
+                _ => {}
             }
-            PendingView::Delete(entries) => {
-                for entry in *entries {
-                    console.out(&format!("{} {}", label, entry.path))?;
-                }
-            }
         }
-        Ok(())
+        pending
     }
 }
 
-fn resolve_category_setting(
-    choice: Option<bool>,
-    label: &str,
-    view: Option<PendingView<'_>>,
+fn collect_policy(
+    pending: &PendingSets,
+    copy_a_override: Option<cli::CopyPolicyArg>,
+    copy_b_override: Option<cli::CopyPolicyArg>,
+    delete_a_override: Option<cli::DeletePolicyArg>,
+    delete_b_override: Option<cli::DeletePolicyArg>,
     dry_run: bool,
     auto_yes: bool,
     console: &mut Console,
-) -> Result<bool> {
-    if view.as_ref().map(|v| v.len()).unwrap_or(0) == 0 {
-        return Ok(true);
-    }
-    if let Some(value) = choice {
-        return Ok(value);
-    }
-    if dry_run || auto_yes {
-        Ok(true)
-    } else {
-        prompt_category(label, view.as_ref(), console)
-    }
+) -> Result<Policy> {
+    Ok(Policy {
+        copy_a_to_b: resolve_copy_policy(
+            "Copy A → B",
+            &pending.copy_a_to_b,
+            copy_a_override,
+            dry_run,
+            auto_yes,
+            console,
+        )?,
+        copy_b_to_a: resolve_copy_policy(
+            "Copy B → A",
+            &pending.copy_b_to_a,
+            copy_b_override,
+            dry_run,
+            auto_yes,
+            console,
+        )?,
+        delete_on_a: resolve_delete_policy(
+            "Delete on A",
+            &pending.delete_a,
+            delete_a_override,
+            dry_run,
+            auto_yes,
+            console,
+        )?,
+        delete_on_b: resolve_delete_policy(
+            "Delete on B",
+            &pending.delete_b,
+            delete_b_override,
+            dry_run,
+            auto_yes,
+            console,
+        )?,
+    })
 }
 
-fn prompt_category(
+fn resolve_copy_policy(
     label: &str,
-    view: Option<&PendingView<'_>>,
+    paths: &[String],
+    override_choice: Option<cli::CopyPolicyArg>,
+    dry_run: bool,
+    auto_yes: bool,
     console: &mut Console,
-) -> Result<bool> {
+) -> Result<CopyPolicy> {
+    if paths.is_empty() {
+        return Ok(CopyPolicy::Allow);
+    }
+    if let Some(value) = override_choice {
+        return Ok(match value {
+            cli::CopyPolicyArg::Allow => CopyPolicy::Allow,
+            cli::CopyPolicyArg::Skip => CopyPolicy::Skip,
+        });
+    }
+    if dry_run || auto_yes {
+        return Ok(CopyPolicy::Allow);
+    }
+    prompt_copy_policy(label, paths, console)
+}
+
+fn resolve_delete_policy(
+    label: &str,
+    paths: &[String],
+    override_choice: Option<cli::DeletePolicyArg>,
+    dry_run: bool,
+    auto_yes: bool,
+    console: &mut Console,
+) -> Result<DeletePolicy> {
+    if paths.is_empty() {
+        return Ok(DeletePolicy::Delete);
+    }
+    if let Some(value) = override_choice {
+        return Ok(match value {
+            cli::DeletePolicyArg::Delete => DeletePolicy::Delete,
+            cli::DeletePolicyArg::Restore => DeletePolicy::Restore,
+            cli::DeletePolicyArg::Skip => DeletePolicy::Skip,
+        });
+    }
+    if dry_run || auto_yes {
+        return Ok(DeletePolicy::Delete);
+    }
+    prompt_delete_policy(label, paths, console)
+}
+
+fn prompt_copy_policy(label: &str, paths: &[String], console: &mut Console) -> Result<CopyPolicy> {
     loop {
-        console.out_raw(&format!("Allow {label}? [y/dry/N]: "))?;
+        console.out_raw(&format!(
+            "Allow {label}? [y]es [n]o [l]ist [h]elp (default: n): "
+        ))?;
         console.flush_out()?;
         let mut input = String::new();
         io::stdin().read_line(&mut input)?;
-        let decision = input.trim().to_lowercase();
+        let decision = input.trim().to_ascii_lowercase();
         match decision.as_str() {
-            "y" | "yes" => return Ok(true),
-            "" | "n" | "no" => return Ok(false),
-            "dry" | "d" => {
-                if let Some(v) = view {
-                    console.out(&format!("\nPending {label}:"))?;
-                    v.print(label, console)?;
-                    console.out("")?;
-                } else {
-                    console.out(&format!("No pending items for {label}."))?;
+            "y" | "yes" => return Ok(CopyPolicy::Allow),
+            "" | "n" | "no" => return Ok(CopyPolicy::Skip),
+            "l" | "list" => {
+                print_pending_list(label, paths, console)?;
+            }
+            "h" | "help" | "?" => {
+                console.out("y = allow, n = skip, l = list pending paths")?;
+            }
+            _ => console.out("Please answer y, n, l, or h.")?,
+        }
+    }
+}
+
+fn prompt_delete_policy(label: &str, paths: &[String], console: &mut Console) -> Result<DeletePolicy> {
+    loop {
+        console.out_raw(&format!(
+            "Action for {label}? [d]elete [r]estore [s]kip [l]ist [h]elp (default: s): "
+        ))?;
+        console.flush_out()?;
+        let mut input = String::new();
+        io::stdin().read_line(&mut input)?;
+        let decision = input.trim().to_ascii_lowercase();
+        match decision.as_str() {
+            "d" | "delete" => return Ok(DeletePolicy::Delete),
+            "r" | "restore" => return Ok(DeletePolicy::Restore),
+            "" | "s" | "skip" => return Ok(DeletePolicy::Skip),
+            "l" | "list" => {
+                print_pending_list(label, paths, console)?;
+            }
+            "h" | "help" | "?" => {
+                console.out("d = delete, r = restore, s = skip, l = list pending paths")?;
+            }
+            _ => console.out("Please answer d, r, s, l, or h.")?,
+        }
+    }
+}
+
+fn print_pending_list(label: &str, paths: &[String], console: &mut Console) -> Result<()> {
+    console.out(&format!("\nPending {label}:"))?;
+    for path in paths {
+        console.out(&format!("{label} {path}"))?;
+    }
+    console.out("")?;
+    Ok(())
+}
+
+fn apply_policy_to_diffs(diffs: &mut [diff::DiffResult], policy: &Policy) -> Result<()> {
+    for diff in diffs {
+        match diff.action {
+            diff::SyncAction::CopyAtoB => {
+                if policy.copy_a_to_b == CopyPolicy::Skip {
+                    diff.action = diff::SyncAction::NoOp;
                 }
             }
-            _ => console.out("Please answer 'y', 'n', or 'dry'.")?,
+            diff::SyncAction::CopyBtoA => {
+                if policy.copy_b_to_a == CopyPolicy::Skip {
+                    diff.action = diff::SyncAction::NoOp;
+                }
+            }
+            diff::SyncAction::DeleteA => match policy.delete_on_a {
+                DeletePolicy::Delete => {}
+                DeletePolicy::Skip => diff.action = diff::SyncAction::NoOp,
+                DeletePolicy::Restore => {
+                    if diff.change_a.entry_now.is_none() {
+                        anyhow::bail!("Cannot restore {}: missing source on A", diff.path);
+                    }
+                    diff.action = diff::SyncAction::CopyAtoB;
+                }
+            },
+            diff::SyncAction::DeleteB => match policy.delete_on_b {
+                DeletePolicy::Delete => {}
+                DeletePolicy::Skip => diff.action = diff::SyncAction::NoOp,
+                DeletePolicy::Restore => {
+                    if diff.change_b.entry_now.is_none() {
+                        anyhow::bail!("Cannot restore {}: missing source on B", diff.path);
+                    }
+                    diff.action = diff::SyncAction::CopyBtoA;
+                }
+            },
+            _ => {}
         }
+    }
+    Ok(())
+}
+
+#[cfg(test)]
+mod policy_tests {
+    use super::*;
+    use crate::diff::{ChangeType, SideChange};
+    use crate::roots::EntryKind;
+
+    fn make_scan_entry(path: &str) -> ScanEntry {
+        ScanEntry {
+            path: path.to_string(),
+            kind: EntryKind::File,
+            size: 1,
+            mtime: 0,
+            mode: 0o644,
+            nlink: 1,
+            dev: 1,
+            inode: 1,
+            hash: None,
+            link_target: None,
+        }
+    }
+
+    fn make_delete_a_diff(path: &str, has_source: bool) -> diff::DiffResult {
+        let entry_a = if has_source {
+            Some(make_scan_entry(path))
+        } else {
+            None
+        };
+        diff::DiffResult {
+            path: path.to_string(),
+            action: diff::SyncAction::DeleteA,
+            change_a: SideChange {
+                change: ChangeType::Unchanged,
+                entry_now: entry_a,
+                entry_prev: None,
+            },
+            change_b: SideChange {
+                change: ChangeType::Deleted,
+                entry_now: None,
+                entry_prev: None,
+            },
+        }
+    }
+
+    #[test]
+    fn restore_turns_delete_into_copy() -> Result<()> {
+        let mut diffs = vec![make_delete_a_diff("file.txt", true)];
+        let policy = Policy {
+            copy_a_to_b: CopyPolicy::Allow,
+            copy_b_to_a: CopyPolicy::Allow,
+            delete_on_a: DeletePolicy::Restore,
+            delete_on_b: DeletePolicy::Delete,
+        };
+        apply_policy_to_diffs(&mut diffs, &policy)?;
+        assert!(matches!(diffs[0].action, diff::SyncAction::CopyAtoB));
+        Ok(())
+    }
+
+    #[test]
+    fn restore_requires_source() {
+        let mut diffs = vec![make_delete_a_diff("missing.txt", false)];
+        let policy = Policy {
+            copy_a_to_b: CopyPolicy::Allow,
+            copy_b_to_a: CopyPolicy::Allow,
+            delete_on_a: DeletePolicy::Restore,
+            delete_on_b: DeletePolicy::Delete,
+        };
+        let result = apply_policy_to_diffs(&mut diffs, &policy);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn skip_copy_turns_into_noop() -> Result<()> {
+        let mut diffs = vec![diff::DiffResult {
+            path: "copy.txt".to_string(),
+            action: diff::SyncAction::CopyAtoB,
+            change_a: SideChange {
+                change: ChangeType::Created,
+                entry_now: Some(make_scan_entry("copy.txt")),
+                entry_prev: None,
+            },
+            change_b: SideChange {
+                change: ChangeType::Unchanged,
+                entry_now: None,
+                entry_prev: None,
+            },
+        }];
+        let policy = Policy {
+            copy_a_to_b: CopyPolicy::Skip,
+            copy_b_to_a: CopyPolicy::Allow,
+            delete_on_a: DeletePolicy::Delete,
+            delete_on_b: DeletePolicy::Delete,
+        };
+        apply_policy_to_diffs(&mut diffs, &policy)?;
+        assert!(matches!(diffs[0].action, diff::SyncAction::NoOp));
+        Ok(())
     }
 }
 

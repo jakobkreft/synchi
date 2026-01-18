@@ -1,6 +1,4 @@
 use crate::diff::{DiffResult, SyncAction};
-use crate::plan::{CopyDirection, DeleteOp, DeleteSide, Plan};
-use crate::roots::EntryKind;
 use crate::scan::Entry as ScanEntry;
 use anyhow::Result;
 use crossterm::{
@@ -56,9 +54,9 @@ impl AppState {
 pub struct Ui;
 
 impl Ui {
-    pub fn resolve_conflicts(mut plan: Plan) -> Result<Plan> {
-        if plan.conflicts.is_empty() {
-            return Ok(plan);
+    pub fn resolve_conflicts(conflicts: Vec<DiffResult>) -> Result<Vec<ConflictDecision>> {
+        if conflicts.is_empty() {
+            return Ok(Vec::new());
         }
 
         enable_raw_mode()?;
@@ -67,9 +65,7 @@ impl Ui {
         let backend = CrosstermBackend::new(stdout);
         let mut terminal = Terminal::new(backend)?;
 
-        let conflicts = std::mem::take(&mut plan.conflicts);
         let mut app = AppState::new(conflicts);
-
         let res = Self::run_app(&mut terminal, &mut app);
 
         disable_raw_mode()?;
@@ -78,9 +74,7 @@ impl Ui {
 
         res?;
 
-        Self::apply_choices(&mut plan, app)?;
-
-        Ok(plan)
+        Ok(Self::collect_choices(app))
     }
 
     fn run_app(
@@ -173,60 +167,44 @@ impl Ui {
         }
     }
 
-    fn apply_choices(plan: &mut Plan, app: AppState) -> Result<()> {
+    fn collect_choices(app: AppState) -> Vec<ConflictDecision> {
+        let mut decisions = Vec::new();
         for (i, conflict) in app.conflicts.into_iter().enumerate() {
             let choice = match app.choices.get(i).and_then(|c| c.clone()) {
                 Some(action) => action,
                 None => continue,
             };
-
-            match choice {
+            let action = match choice {
                 SyncAction::CopyAtoB => {
-                    if let Some(entry) = conflict.change_a.entry_now.clone() {
-                        plan.add_copy(CopyDirection::AtoB, entry.to_state());
+                    if conflict.change_a.entry_now.is_some() {
+                        SyncAction::CopyAtoB
                     } else {
-                        let kind = conflict
-                            .change_b
-                            .entry_now
-                            .as_ref()
-                            .map(|e| e.kind)
-                            .or_else(|| conflict.change_b.entry_prev.as_ref().map(|e| e.kind))
-                            .unwrap_or(EntryKind::File);
-                        plan.add_delete(
-                            DeleteSide::RootB,
-                            DeleteOp {
-                                path: conflict.path.clone(),
-                                kind,
-                            },
-                        );
+                        SyncAction::DeleteB
                     }
                 }
                 SyncAction::CopyBtoA => {
-                    if let Some(entry) = conflict.change_b.entry_now.clone() {
-                        plan.add_copy(CopyDirection::BtoA, entry.to_state());
+                    if conflict.change_b.entry_now.is_some() {
+                        SyncAction::CopyBtoA
                     } else {
-                        let kind = conflict
-                            .change_a
-                            .entry_now
-                            .as_ref()
-                            .map(|e| e.kind)
-                            .or_else(|| conflict.change_a.entry_prev.as_ref().map(|e| e.kind))
-                            .unwrap_or(EntryKind::File);
-                        plan.add_delete(
-                            DeleteSide::RootA,
-                            DeleteOp {
-                                path: conflict.path.clone(),
-                                kind,
-                            },
-                        );
+                        SyncAction::DeleteA
                     }
                 }
-                SyncAction::NoOp => {}
-                _ => {}
-            }
+                SyncAction::NoOp => SyncAction::NoOp,
+                _ => SyncAction::NoOp,
+            };
+            decisions.push(ConflictDecision {
+                path: conflict.path,
+                action,
+            });
         }
-        Ok(())
+        decisions
     }
+}
+
+#[derive(Debug, Clone)]
+pub struct ConflictDecision {
+    pub path: String,
+    pub action: SyncAction,
 }
 
 fn entry_summary(entry: Option<&ScanEntry>) -> String {

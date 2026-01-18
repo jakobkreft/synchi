@@ -49,20 +49,6 @@ impl Plan {
             + self.hardlink_b_to_a.len()
     }
 
-    pub fn add_copy(&mut self, direction: CopyDirection, entry: Entry) {
-        match direction {
-            CopyDirection::AtoB => self.copy_a_to_b.push(entry),
-            CopyDirection::BtoA => self.copy_b_to_a.push(entry),
-        }
-    }
-
-    pub fn add_delete(&mut self, side: DeleteSide, op: DeleteOp) {
-        match side {
-            DeleteSide::RootA => self.delete_a.push(op),
-            DeleteSide::RootB => self.delete_b.push(op),
-        }
-    }
-
     pub fn add_link(&mut self, direction: CopyDirection, op: LinkOp) {
         match direction {
             CopyDirection::AtoB => self.hardlink_a_to_b.push(op),
