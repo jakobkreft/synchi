@@ -59,10 +59,7 @@ pub fn hardlink_groups(entries: &[Entry]) -> HardlinkGroups {
             dev: entry.dev,
             inode: entry.inode,
         };
-        groups
-            .entry(key)
-            .or_insert_with(Vec::new)
-            .push(entry.path.clone());
+        groups.entry(key).or_default().push(entry.path.clone());
     }
     groups.retain(|_, paths| paths.len() > 1);
     groups

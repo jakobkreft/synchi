@@ -147,12 +147,7 @@ impl SshRead {
         let stderr = match self.stderr_handle.take() {
             Some(handle) => match handle.join() {
                 Ok(result) => result?,
-                Err(_) => {
-                    return Err(io::Error::new(
-                        io::ErrorKind::Other,
-                        "ssh stderr thread panicked",
-                    ))
-                }
+                Err(_) => return Err(io::Error::other("ssh stderr thread panicked")),
             },
             None => Vec::new(),
         };
@@ -170,7 +165,7 @@ impl SshRead {
         } else {
             message.push_str(" (terminated by signal)");
         }
-        Err(io::Error::new(io::ErrorKind::Other, message))
+        Err(io::Error::other(message))
     }
 }
 

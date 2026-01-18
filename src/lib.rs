@@ -495,12 +495,14 @@ pub fn run(cli: Cli) -> Result<()> {
             let pending = PendingSets::from_diffs(&diffs);
             let policy = collect_policy(
                 &pending,
-                *copy_a_to_b,
-                *copy_b_to_a,
-                *delete_on_a,
-                *delete_on_b,
-                *dry_run,
-                *auto_yes,
+                PolicyPrompt {
+                    copy_a_override: *copy_a_to_b,
+                    copy_b_override: *copy_b_to_a,
+                    delete_a_override: *delete_on_a,
+                    delete_b_override: *delete_on_b,
+                    dry_run: *dry_run,
+                    auto_yes: *auto_yes,
+                },
                 &mut console,
             )?;
             apply_policy_to_diffs(&mut diffs, &policy)?;
@@ -518,16 +520,16 @@ pub fn run(cli: Cli) -> Result<()> {
                 {
                     let allow_copy_a_to_b = policy.copy_a_to_b == CopyPolicy::Allow;
                     let allow_copy_b_to_a = policy.copy_b_to_a == CopyPolicy::Allow;
-                    plan::apply_hardlink_preserve(
-                        &mut plan,
-                        diffs_for_links.as_ref().unwrap(),
+                    plan::apply_hardlink_preserve(plan::HardlinkPreserveInputs {
+                        plan: &mut plan,
+                        diffs: diffs_for_links.as_ref().unwrap(),
                         groups_a,
                         groups_b,
-                        scan_a_for_links.as_ref().unwrap(),
-                        scan_b_for_links.as_ref().unwrap(),
+                        scan_a: scan_a_for_links.as_ref().unwrap(),
+                        scan_b: scan_b_for_links.as_ref().unwrap(),
                         allow_copy_a_to_b,
                         allow_copy_b_to_a,
-                    );
+                    });
                 }
             }
 
@@ -875,47 +877,51 @@ impl PendingSets {
     }
 }
 
-fn collect_policy(
-    pending: &PendingSets,
+struct PolicyPrompt {
     copy_a_override: Option<cli::CopyPolicyArg>,
     copy_b_override: Option<cli::CopyPolicyArg>,
     delete_a_override: Option<cli::DeletePolicyArg>,
     delete_b_override: Option<cli::DeletePolicyArg>,
     dry_run: bool,
     auto_yes: bool,
+}
+
+fn collect_policy(
+    pending: &PendingSets,
+    prompt: PolicyPrompt,
     console: &mut Console,
 ) -> Result<Policy> {
     Ok(Policy {
         copy_a_to_b: resolve_copy_policy(
             "Copy A → B",
             &pending.copy_a_to_b,
-            copy_a_override,
-            dry_run,
-            auto_yes,
+            prompt.copy_a_override,
+            prompt.dry_run,
+            prompt.auto_yes,
             console,
         )?,
         copy_b_to_a: resolve_copy_policy(
             "Copy B → A",
             &pending.copy_b_to_a,
-            copy_b_override,
-            dry_run,
-            auto_yes,
+            prompt.copy_b_override,
+            prompt.dry_run,
+            prompt.auto_yes,
             console,
         )?,
         delete_on_a: resolve_delete_policy(
             "Delete on A",
             &pending.delete_a,
-            delete_a_override,
-            dry_run,
-            auto_yes,
+            prompt.delete_a_override,
+            prompt.dry_run,
+            prompt.auto_yes,
             console,
         )?,
         delete_on_b: resolve_delete_policy(
             "Delete on B",
             &pending.delete_b,
-            delete_b_override,
-            dry_run,
-            auto_yes,
+            prompt.delete_b_override,
+            prompt.dry_run,
+            prompt.auto_yes,
             console,
         )?,
     })

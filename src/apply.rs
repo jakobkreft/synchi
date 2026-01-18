@@ -204,7 +204,7 @@ impl<'a> Executor<'a> {
             }
 
             if streaming {
-                pending_commits.extend(chunk.into_iter());
+                pending_commits.extend(chunk);
                 break;
             } else {
                 self.db

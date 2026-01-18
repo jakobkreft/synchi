@@ -111,16 +111,28 @@ impl PlanBuilder {
     }
 }
 
-pub fn apply_hardlink_preserve(
-    plan: &mut Plan,
-    diffs: &[DiffResult],
-    groups_a: &HardlinkGroups,
-    groups_b: &HardlinkGroups,
-    scan_a: &[ScanEntry],
-    scan_b: &[ScanEntry],
-    allow_copy_a_to_b: bool,
-    allow_copy_b_to_a: bool,
-) {
+pub struct HardlinkPreserveInputs<'a> {
+    pub plan: &'a mut Plan,
+    pub diffs: &'a [DiffResult],
+    pub groups_a: &'a HardlinkGroups,
+    pub groups_b: &'a HardlinkGroups,
+    pub scan_a: &'a [ScanEntry],
+    pub scan_b: &'a [ScanEntry],
+    pub allow_copy_a_to_b: bool,
+    pub allow_copy_b_to_a: bool,
+}
+
+pub fn apply_hardlink_preserve(inputs: HardlinkPreserveInputs<'_>) {
+    let HardlinkPreserveInputs {
+        plan,
+        diffs,
+        groups_a,
+        groups_b,
+        scan_a,
+        scan_b,
+        allow_copy_a_to_b,
+        allow_copy_b_to_a,
+    } = inputs;
     let diff_map = diffs
         .iter()
         .map(|diff| (diff.path.as_str(), diff))
@@ -276,7 +288,7 @@ fn dest_will_exist(
         .unwrap_or(false)
 }
 
-fn sort_deletes(ops: &mut Vec<DeleteOp>) {
+fn sort_deletes(ops: &mut [DeleteOp]) {
     ops.sort_by(|a, b| {
         let depth_a = delete_depth(&a.path);
         let depth_b = delete_depth(&b.path);
@@ -369,16 +381,16 @@ mod tests {
         plan.copy_a_to_b.push(scan_a[1].to_state());
         plan.copy_a_to_b.push(scan_a[0].to_state());
 
-        apply_hardlink_preserve(
-            &mut plan,
-            &[],
-            &groups_a,
-            &groups_b,
-            &scan_a,
-            &scan_b,
-            true,
-            false,
-        );
+        apply_hardlink_preserve(HardlinkPreserveInputs {
+            plan: &mut plan,
+            diffs: &[],
+            groups_a: &groups_a,
+            groups_b: &groups_b,
+            scan_a: &scan_a,
+            scan_b: &scan_b,
+            allow_copy_a_to_b: true,
+            allow_copy_b_to_a: false,
+        });
 
         assert_eq!(plan.copy_a_to_b.len(), 1);
         assert_eq!(plan.hardlink_a_to_b.len(), 1);
