@@ -38,10 +38,20 @@ jobs:
         run: cargo clippy -- -D warnings
 
       - name: Build release binary
-        run: cargo build --release --locked
+        run: |
+          if [ "${{ matrix.os }}" = "ubuntu-latest" ]; then
+            cargo build --release --locked
+          else
+            cargo build --release
+          fi
 
       - name: Run tests
-        run: cargo test --release --locked
+        run: |
+          if [ "${{ matrix.os }}" = "ubuntu-latest" ]; then
+            cargo test --release --locked
+          else
+            cargo test --release
+          fi
 
       - name: Prepare release artifact
         run: |
