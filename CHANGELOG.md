@@ -2,7 +2,7 @@
 
 All notable changes to this project will be documented here.
 
-## 0.1.0
+## 0.1.1
 
 - Two-way sync with conflict detection and interactive resolution.
 - Local and SSH roots with batched transfers.

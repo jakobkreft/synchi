@@ -1,6 +1,6 @@
 [package]
 name = "synchi"
-version = "0.1.0"
+version = "0.1.1"
 edition = "2021"
 description = "Two-way file sync with conflict detection for local and SSH roots."
 license = "GPL-3.0-only"
