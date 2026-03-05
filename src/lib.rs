@@ -1004,23 +1004,24 @@ fn prompt_delete_policy(
 ) -> Result<DeletePolicy> {
     loop {
         console.out_raw(&format!(
-            "Action for {label}? [d]elete [r]estore [s]kip [l]ist [h]elp (default: s): "
+            "Action for {label}? [y]es [n]o [l]ist [h]elp (default: n): "
         ))?;
         console.flush_out()?;
         let mut input = String::new();
         io::stdin().read_line(&mut input)?;
         let decision = input.trim().to_ascii_lowercase();
         match decision.as_str() {
-            "d" | "delete" => return Ok(DeletePolicy::Delete),
-            "r" | "restore" => return Ok(DeletePolicy::Restore),
-            "" | "s" | "skip" => return Ok(DeletePolicy::Skip),
+            "y" | "yes" => return Ok(DeletePolicy::Delete),
+            "" | "n" | "no" => return Ok(DeletePolicy::Skip),
             "l" | "list" => {
                 print_pending_list(label, paths, console)?;
             }
             "h" | "help" | "?" => {
-                console.out("d = delete, r = restore, s = skip, l = list pending paths")?;
+                console.out(
+                    "y = allow delete, n = skip delete, l = list pending paths (restore is CLI-only: --delete-on-a/--delete-on-b restore)",
+                )?;
             }
-            _ => console.out("Please answer d, r, s, l, or h.")?,
+            _ => console.out("Please answer y, n, l, or h.")?,
         }
     }
 }

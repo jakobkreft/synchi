@@ -88,7 +88,7 @@ Setting `force` enables one-way mirroring:
 
 When force mode is active, conflicts are suppressed because one side always wins.
 
-Without force, `synchi sync` prints the diff summary and then prompts separately for each category that still has work pending (`Copy A → B`, `Copy B → A`, `Delete on A`, `Delete on B`). Reply with `y`/`n` for copy categories, `d`/`r`/`s` for delete categories, use `l` to list pending paths, pre-approve via CLI (`--copy-a-to-b allow|skip`, etc.), or pass `-y/--yes` to auto-approve all unanswered categories in one go.
+Without force, `synchi sync` prints the diff summary and then prompts separately for each category that still has work pending (`Copy A → B`, `Copy B → A`, `Delete on A`, `Delete on B`). Reply with `y`/`n`, use `l` to list pending paths, pre-approve via CLI (`--copy-a-to-b allow|skip`, etc.), or pass `-y/--yes` to auto-approve all unanswered categories in one go.
 
 ## Hardlink Handling
 
@@ -128,6 +128,8 @@ Most options can be overridden via CLI flags, including:
 * `--dry-run`
 * `-y / --yes`
 * Category approvals: `--copy-a-to-b allow|skip`, `--copy-b-to-a allow|skip`, `--delete-on-a delete|restore|skip`, `--delete-on-b delete|restore|skip`
+
+`restore` is available through CLI overrides only.
 
 Both `synchi status` and `synchi sync` use the same logic.
 Running `status` first shows exactly what `sync` would do.
