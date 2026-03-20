@@ -1,4 +1,5 @@
 use crate::diff::{DiffResult, SyncAction};
+use crate::journal::format_bytes;
 use crate::scan::Entry as ScanEntry;
 use anyhow::Result;
 use crossterm::{
@@ -213,13 +214,81 @@ fn entry_summary(entry: Option<&ScanEntry>) -> String {
             let hash_str = e
                 .hash
                 .as_ref()
-                .map(hex::encode)
+                .map(|h| {
+                    let s = hex::encode(h);
+                    s[..s.len().min(12)].to_string()
+                })
                 .unwrap_or_else(|| "-".to_string());
+            let mode_perms = e.mode & 0o7777;
             format!(
-                "   size={} bytes  mtime={}  mode={:o}  hash={}",
-                e.size, e.mtime, e.mode, hash_str
+                "   size={}  mtime={}  mode={:o}  hash={}",
+                format_bytes(e.size),
+                format_mtime(e.mtime),
+                mode_perms,
+                hash_str
             )
         }
         None => "   (absent)".to_string(),
     }
+}
+
+fn format_mtime(epoch: i64) -> String {
+    if epoch <= 0 {
+        return "unknown".to_string();
+    }
+    let secs = epoch as u64;
+    let sec_of_day = secs % 86400;
+    let hours = sec_of_day / 3600;
+    let minutes = (sec_of_day % 3600) / 60;
+    let seconds = sec_of_day % 60;
+
+    let mut days = (secs / 86400) as i64;
+    let mut year = 1970i32;
+
+    loop {
+        let days_in_year = if is_leap(year) { 366 } else { 365 };
+        if days < days_in_year {
+            break;
+        }
+        days -= days_in_year;
+        year += 1;
+    }
+
+    let leap = is_leap(year);
+    let month_days = [
+        31,
+        if leap { 29 } else { 28 },
+        31,
+        30,
+        31,
+        30,
+        31,
+        31,
+        30,
+        31,
+        30,
+        31,
+    ];
+    let mut month = 0usize;
+    for (i, &md) in month_days.iter().enumerate() {
+        if days < md as i64 {
+            month = i;
+            break;
+        }
+        days -= md as i64;
+    }
+
+    format!(
+        "{:04}-{:02}-{:02} {:02}:{:02}:{:02}",
+        year,
+        month + 1,
+        days + 1,
+        hours,
+        minutes,
+        seconds
+    )
+}
+
+fn is_leap(year: i32) -> bool {
+    (year % 4 == 0 && year % 100 != 0) || year % 400 == 0
 }

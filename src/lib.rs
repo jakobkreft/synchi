@@ -142,6 +142,10 @@ pub fn run(cli: Cli) -> Result<()> {
                 true,
                 &mut console,
             )?;
+            if summary.conflicts > 0 {
+                console.out(&format!("\nFound {} conflicts:", summary.conflicts))?;
+                print_conflict_paths(&prepared.diffs, &mut console)?;
+            }
         }
         Commands::Sync {
             dry_run,
@@ -185,10 +189,12 @@ pub fn run(cli: Cli) -> Result<()> {
                 .filter(|diff| matches!(diff.action, diff::SyncAction::Conflict(_)))
                 .count();
             if conflict_count > 0 {
-                console.out(&format!("Found {} conflicts.", conflict_count))?;
                 if *dry_run {
+                    console.out(&format!("Found {} conflicts:", conflict_count))?;
+                    print_conflict_paths(&prepared.diffs, &mut console)?;
                     console.out("Dry run: Skipping conflict resolution.")?;
                 } else {
+                    console.out(&format!("Found {} conflicts.", conflict_count))?;
                     let conflicts: Vec<diff::DiffResult> = prepared
                         .diffs
                         .iter()
@@ -718,6 +724,15 @@ fn print_status_summary(
             console.out("\n✓ Everything is in sync!")?;
         } else {
             console.out("\nRun 'synchi sync' to synchronize.")?;
+        }
+    }
+    Ok(())
+}
+
+fn print_conflict_paths(diffs: &[diff::DiffResult], console: &mut Console) -> Result<()> {
+    for diff in diffs {
+        if let diff::SyncAction::Conflict(ref reason) = diff.action {
+            console.out(&format!("  {} ({:?})", diff.path, reason))?;
         }
     }
     Ok(())
