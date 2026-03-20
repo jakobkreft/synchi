@@ -87,22 +87,18 @@ pub fn run(cli: Cli) -> Result<()> {
         &mut console,
     )?;
 
+    let root_a_spec = root_a_spec.context("Root A not defined in config or CLI")?;
+    let root_b_spec = root_b_spec.context("Root B not defined in config or CLI")?;
+    let db_filename = config.state_db_filename();
+    let root_a = match &root_a_spec {
+        RootSpec::Local { path } => roots::LocalRoot::new(path)?,
+        _ => anyhow::bail!("Root A must be a local path"),
+    };
+
     match &cli.command {
         Commands::Init => {
             info!("Initializing synchi...");
 
-            let root_a_spec = root_a_spec
-                .as_ref()
-                .context("Root A not defined in config or CLI")?;
-            let root_b_spec = root_b_spec
-                .as_ref()
-                .context("Root B not defined in config or CLI")?;
-            let db_filename = config.state_db_filename();
-
-            let root_a = match root_a_spec {
-                RootSpec::Local { path } => roots::LocalRoot::new(path)?,
-                _ => anyhow::bail!("Root A must be a local path"),
-            };
             if root_b_spec.is_local() {
                 let local_path = root_b_spec
                     .local_path()
@@ -128,161 +124,20 @@ pub fn run(cli: Cli) -> Result<()> {
         Commands::Status => {
             info!("Checking status...");
 
-            let db_filename = config.state_db_filename();
-
-            let root_a_spec = root_a_spec
-                .as_ref()
-                .context("Root A not defined in config or CLI")?;
-            let root_b_spec = root_b_spec
-                .as_ref()
-                .context("Root B not defined in config or CLI")?;
-
-            let root_a = match root_a_spec {
-                RootSpec::Local { path } => roots::LocalRoot::new(path)?,
-                _ => anyhow::bail!("Root A must be a local path"),
-            };
-            let root_b = root_b_spec.root()?;
-
             let state_db_path = root_a.path().join(".synchi").join(&db_filename);
             if !state_db_path.exists() {
                 console.out("Not initialized. Run 'synchi init' first.")?;
                 return Ok(());
             }
-            let db = state::StateDb::open_readonly(&state_db_path)?;
-            let state_entries = db.list_entries()?;
-            let state_count = state_entries.len();
-            let state_hint = state_count as u64;
-            let state_map: HashMap<String, state::Entry> = state_entries
-                .iter()
-                .map(|e| (e.path.clone(), e.clone()))
-                .collect();
+            let state_entries = state::StateDb::open_readonly(&state_db_path)?.list_entries()?;
 
-            let default_include = vec!["**".to_string()];
-            let include_patterns = config.include.as_deref().unwrap_or(&default_include);
-            let default_ignore = vec![];
-            let ignore_patterns = config.ignore.as_deref().unwrap_or(&default_ignore);
-            if include_patterns.is_empty() {
-                tracing::warn!("Include patterns are empty; nothing will be scanned or synced.");
-            }
-            let filter = scan::Filter::new(include_patterns, ignore_patterns)?;
-            let hardlink_mode = config.hardlinks;
-
-            let label_a = format!("Root A ({})", root_a.path().display());
-            info!("Scanning {}", label_a);
-            let mut scan_a = run_scan_with_progress(
-                &label_a,
-                Some(state_hint),
-                |pb| scan::LocalScanner::new(&root_a, &filter).scan_with_progress(Some(pb)),
-                &console,
-            )?;
-            let mut scan_b = if root_b.kind() == roots::RootType::Ssh {
-                let ssh_root = root_b
-                    .as_any()
-                    .downcast_ref::<roots::SshRoot>()
-                    .context("Root B is not SSH")?;
-                let caps = ssh_root.probe_caps()?;
-                let label_b = format!("Root B ({})", ssh_root.path().display());
-                info!("Scanning {}", label_b);
-                if !matches!(hardlink_mode, config::HardlinkMode::Copy) && !caps.has_find_inode {
-                    anyhow::bail!("Hardlink modes require remote `find` with %D/%i support");
-                }
-                run_scan_with_progress(
-                    &label_b,
-                    Some(state_hint),
-                    |pb| {
-                        scan::RemoteScanner::new(ssh_root, &filter, caps)
-                            .scan_with_progress(Some(pb))
-                    },
-                    &console,
-                )?
-            } else {
-                let local_b = root_b
-                    .as_any()
-                    .downcast_ref::<roots::LocalRoot>()
-                    .context("Root B is not local")?;
-                let label_b = format!("Root B ({})", local_b.path().display());
-                info!("Scanning {}", label_b);
-                run_scan_with_progress(
-                    &label_b,
-                    Some(state_hint),
-                    |pb| scan::LocalScanner::new(local_b, &filter).scan_with_progress(Some(pb)),
-                    &console,
-                )?
-            };
-            if !matches!(hardlink_mode, config::HardlinkMode::Copy)
-                && (scan::has_missing_inode(&scan_a) || scan::has_missing_inode(&scan_b))
-            {
-                anyhow::bail!("Hardlink modes require inode/device IDs");
-            }
-            let _hardlink_groups_a = if matches!(hardlink_mode, config::HardlinkMode::Preserve) {
-                Some(scan::hardlink_groups(&scan_a))
-            } else {
-                None
-            };
-            let _hardlink_groups_b = if matches!(hardlink_mode, config::HardlinkMode::Preserve) {
-                Some(scan::hardlink_groups(&scan_b))
-            } else {
-                None
-            };
-            let hardlink_skip = if matches!(hardlink_mode, config::HardlinkMode::Skip) {
-                hardlink_skip_paths(&scan_a, &scan_b)
-            } else {
-                HashSet::new()
-            };
-            if !hardlink_skip.is_empty() {
-                tracing::warn!(
-                    "Skipping {} hard-linked paths (hardlinks=skip).",
-                    hardlink_skip.len()
-                );
-                filter_scan_entries(&mut scan_a, &hardlink_skip);
-                filter_scan_entries(&mut scan_b, &hardlink_skip);
-            }
-            let scan_a_count = scan_a.len();
-            let scan_b_count = scan_b.len();
-
-            hash_with_logging(
-                "Root A",
-                &root_a,
-                &mut scan_a,
-                &state_map,
-                config.hash_mode,
-                &console,
-            )?;
-            hash_with_logging(
-                "Root B",
-                root_b.as_ref(),
-                &mut scan_b,
-                &state_map,
-                config.hash_mode,
-                &console,
-            )?;
-
-            let mut state_a = state_entries.clone();
-            let mut state_b = state_entries;
-            if !hardlink_skip.is_empty() {
-                filter_state_entries(&mut state_a, &hardlink_skip);
-                filter_state_entries(&mut state_b, &hardlink_skip);
-            }
-
-            let mut diffs = diff::DiffEngine::diff(scan_a, state_a, scan_b, state_b, &filter);
-
-            if let Some(force_side) = config.force_side()? {
-                match force_side {
-                    config::ForceSide::RootA => {
-                        console.out("Forcing State to match Root A (Mirror A -> B)")?
-                    }
-                    config::ForceSide::RootB => {
-                        console.out("Forcing State to match Root B (Mirror B -> A)")?
-                    }
-                }
-                apply_force_mirror(&mut diffs, force_side);
-            }
-
-            let summary = summarize_diffs(&diffs);
+            let prepared =
+                prepare_pipeline(&config, &root_a, &root_b_spec, state_entries, &mut console)?;
+            let summary = summarize_diffs(&prepared.diffs);
             print_status_summary(
-                scan_a_count,
-                scan_b_count,
-                state_count,
+                prepared.scan_a_count,
+                prepared.scan_b_count,
+                prepared.state_count,
                 &summary,
                 true,
                 &mut console,
@@ -297,14 +152,6 @@ pub fn run(cli: Cli) -> Result<()> {
             delete_on_b,
         } => {
             let overall_start = Instant::now();
-            let db_filename = config.state_db_filename();
-
-            let root_a_spec = root_a_spec
-                .as_ref()
-                .context("Root A not defined in config or CLI")?;
-            let root_b_spec = root_b_spec
-                .as_ref()
-                .context("Root B not defined in config or CLI")?;
 
             info!(
                 "Syncing from {} to {}",
@@ -312,168 +159,28 @@ pub fn run(cli: Cli) -> Result<()> {
                 root_b_spec.display()
             );
 
-            let root_a = match root_a_spec {
-                RootSpec::Local { path } => roots::LocalRoot::new(path)?,
-                _ => anyhow::bail!("Root A must be a local path"),
-            };
-            let root_b = root_b_spec.root()?;
             let state_db_path = root_a.path().join(".synchi").join(&db_filename);
             let state_entries = if state_db_path.exists() {
-                let db = state::StateDb::open_readonly(&state_db_path)?;
-                db.list_entries()?
+                state::StateDb::open_readonly(&state_db_path)?.list_entries()?
             } else {
                 Vec::new()
             };
-            let state_count = state_entries.len();
-            let state_hint = state_count as u64;
-            let state_map: HashMap<String, state::Entry> = state_entries
-                .iter()
-                .map(|e| (e.path.clone(), e.clone()))
-                .collect();
 
-            let default_include = vec!["**".to_string()];
-            let include_patterns = config.include.as_deref().unwrap_or(&default_include);
-            let default_ignore = vec![];
-            let ignore_patterns = config.ignore.as_deref().unwrap_or(&default_ignore);
+            let mut prepared =
+                prepare_pipeline(&config, &root_a, &root_b_spec, state_entries, &mut console)?;
 
-            if include_patterns.is_empty() {
-                tracing::warn!("Include patterns are empty; nothing will be scanned or synced.");
-            }
-            let filter = scan::Filter::new(include_patterns, ignore_patterns)?;
-            let hardlink_mode = config.hardlinks;
-
-            let label_a = format!("Root A ({})", root_a.path().display());
-            info!("Scanning {}", label_a);
-            let mut scan_a = run_scan_with_progress(
-                &label_a,
-                Some(state_hint),
-                |pb| scan::LocalScanner::new(&root_a, &filter).scan_with_progress(Some(pb)),
-                &console,
-            )?;
-            let mut scan_b = if root_b.kind() == roots::RootType::Ssh {
-                let ssh_root = root_b
-                    .as_any()
-                    .downcast_ref::<roots::SshRoot>()
-                    .context("Root B is not SSH")?;
-                let caps = ssh_root.probe_caps()?;
-                let label_b = format!("Root B ({})", ssh_root.path().display());
-                info!("Scanning {}", label_b);
-                if !matches!(hardlink_mode, config::HardlinkMode::Copy) && !caps.has_find_inode {
-                    anyhow::bail!("Hardlink modes require remote `find` with %D/%i support");
-                }
-                run_scan_with_progress(
-                    &label_b,
-                    Some(state_hint),
-                    |pb| {
-                        scan::RemoteScanner::new(ssh_root, &filter, caps)
-                            .scan_with_progress(Some(pb))
-                    },
-                    &console,
-                )?
-            } else if let Some(local_b) = root_b.as_any().downcast_ref::<roots::LocalRoot>() {
-                let label_b = format!("Root B ({})", local_b.path().display());
-                info!("Scanning {}", label_b);
-                run_scan_with_progress(
-                    &label_b,
-                    Some(state_hint),
-                    |pb| scan::LocalScanner::new(local_b, &filter).scan_with_progress(Some(pb)),
-                    &console,
-                )?
-            } else {
-                anyhow::bail!("Unsupported root type for B");
-            };
-            if !matches!(hardlink_mode, config::HardlinkMode::Copy)
-                && (scan::has_missing_inode(&scan_a) || scan::has_missing_inode(&scan_b))
-            {
-                anyhow::bail!("Hardlink modes require inode/device IDs");
-            }
-            let hardlink_groups_a = if matches!(hardlink_mode, config::HardlinkMode::Preserve) {
-                Some(scan::hardlink_groups(&scan_a))
-            } else {
-                None
-            };
-            let hardlink_groups_b = if matches!(hardlink_mode, config::HardlinkMode::Preserve) {
-                Some(scan::hardlink_groups(&scan_b))
-            } else {
-                None
-            };
-            let hardlink_skip = if matches!(hardlink_mode, config::HardlinkMode::Skip) {
-                hardlink_skip_paths(&scan_a, &scan_b)
-            } else {
-                HashSet::new()
-            };
-            if !hardlink_skip.is_empty() {
-                tracing::warn!(
-                    "Skipping {} hard-linked paths (hardlinks=skip).",
-                    hardlink_skip.len()
-                );
-                filter_scan_entries(&mut scan_a, &hardlink_skip);
-                filter_scan_entries(&mut scan_b, &hardlink_skip);
-            }
-            let scan_a_count = scan_a.len();
-            let scan_b_count = scan_b.len();
-
-            hash_with_logging(
-                "Root A",
-                &root_a,
-                &mut scan_a,
-                &state_map,
-                config.hash_mode,
-                &console,
-            )?;
-            let scan_a_state: Vec<state::Entry> = scan_a.iter().map(ScanEntry::to_state).collect();
-            hash_with_logging(
-                "Root B",
-                root_b.as_ref(),
-                &mut scan_b,
-                &state_map,
-                config.hash_mode,
-                &console,
-            )?;
-            let mut state_a = state_entries.clone();
-            let mut state_b = state_entries;
-            if !hardlink_skip.is_empty() {
-                filter_state_entries(&mut state_a, &hardlink_skip);
-                filter_state_entries(&mut state_b, &hardlink_skip);
-            }
-
-            let preserve_mode = matches!(hardlink_mode, config::HardlinkMode::Preserve);
-            let scan_a_for_links = if preserve_mode {
-                Some(scan_a.clone())
-            } else {
-                None
-            };
-            let scan_b_for_links = if preserve_mode {
-                Some(scan_b.clone())
-            } else {
-                None
-            };
-
-            let mut diffs = diff::DiffEngine::diff(scan_a, state_a, scan_b, state_b, &filter);
-
-            if let Some(force_side) = config.force_side()? {
-                match force_side {
-                    config::ForceSide::RootA => {
-                        console.out("Forcing State to match Root A (Mirror A -> B)")?
-                    }
-                    config::ForceSide::RootB => {
-                        console.out("Forcing State to match Root B (Mirror B -> A)")?
-                    }
-                }
-                apply_force_mirror(&mut diffs, force_side);
-            }
-
-            let summary = summarize_diffs(&diffs);
+            let summary = summarize_diffs(&prepared.diffs);
             print_status_summary(
-                scan_a_count,
-                scan_b_count,
-                state_count,
+                prepared.scan_a_count,
+                prepared.scan_b_count,
+                prepared.state_count,
                 &summary,
                 false,
                 &mut console,
             )?;
 
-            let conflict_count = diffs
+            let conflict_count = prepared
+                .diffs
                 .iter()
                 .filter(|diff| matches!(diff.action, diff::SyncAction::Conflict(_)))
                 .count();
@@ -482,17 +189,18 @@ pub fn run(cli: Cli) -> Result<()> {
                 if *dry_run {
                     console.out("Dry run: Skipping conflict resolution.")?;
                 } else {
-                    let conflicts: Vec<diff::DiffResult> = diffs
+                    let conflicts: Vec<diff::DiffResult> = prepared
+                        .diffs
                         .iter()
                         .filter(|diff| matches!(diff.action, diff::SyncAction::Conflict(_)))
                         .cloned()
                         .collect();
                     let decisions = ui::Ui::resolve_conflicts(conflicts)?;
-                    apply_conflict_decisions(&mut diffs, &decisions);
+                    apply_conflict_decisions(&mut prepared.diffs, &decisions);
                 }
             }
 
-            let pending = PendingSets::from_diffs(&diffs);
+            let pending = PendingSets::from_diffs(&prepared.diffs);
             let policy = collect_policy(
                 &pending,
                 PolicyPrompt {
@@ -505,19 +213,20 @@ pub fn run(cli: Cli) -> Result<()> {
                 },
                 &mut console,
             )?;
-            apply_policy_to_diffs(&mut diffs, &policy)?;
+            apply_policy_to_diffs(&mut prepared.diffs, &policy)?;
 
-            let diffs_for_links = if preserve_mode {
-                Some(diffs.clone())
+            let diffs_for_links = if prepared.preserve_mode {
+                Some(prepared.diffs.clone())
             } else {
                 None
             };
-            let mut plan = plan::PlanBuilder::build(diffs);
+            let mut plan = plan::PlanBuilder::build(prepared.diffs);
 
-            if preserve_mode {
-                if let (Some(groups_a), Some(groups_b)) =
-                    (hardlink_groups_a.as_ref(), hardlink_groups_b.as_ref())
-                {
+            if prepared.preserve_mode {
+                if let (Some(groups_a), Some(groups_b)) = (
+                    prepared.hardlink_groups_a.as_ref(),
+                    prepared.hardlink_groups_b.as_ref(),
+                ) {
                     let allow_copy_a_to_b = policy.copy_a_to_b == CopyPolicy::Allow;
                     let allow_copy_b_to_a = policy.copy_b_to_a == CopyPolicy::Allow;
                     plan::apply_hardlink_preserve(plan::HardlinkPreserveInputs {
@@ -525,8 +234,8 @@ pub fn run(cli: Cli) -> Result<()> {
                         diffs: diffs_for_links.as_ref().unwrap(),
                         groups_a,
                         groups_b,
-                        scan_a: scan_a_for_links.as_ref().unwrap(),
-                        scan_b: scan_b_for_links.as_ref().unwrap(),
+                        scan_a: prepared.scan_a_for_links.as_ref().unwrap(),
+                        scan_b: prepared.scan_b_for_links.as_ref().unwrap(),
                         allow_copy_a_to_b,
                         allow_copy_b_to_a,
                     });
@@ -557,20 +266,25 @@ pub fn run(cli: Cli) -> Result<()> {
                 let lock_info = lock_info_string();
                 let lock_name = format!("{}.lock", db_filename);
                 let _lock_a = state::Lock::acquire(&root_a, &lock_name, &lock_info)?;
-                ensure_root_b_marker(root_b.as_ref())?;
+                ensure_root_b_marker(prepared.root_b.as_ref())?;
 
                 let state_db_path = root_a.path().join(".synchi").join(&db_filename);
                 std::fs::create_dir_all(state_db_path.parent().unwrap())?;
                 let db = state::StateDb::open(&state_db_path)?;
-                db.refresh_metadata(&scan_a_state)?;
+                db.refresh_metadata(&prepared.scan_a_state)?;
                 db.queue_plan(&plan)?;
                 let mut journal = journal::Journal::new();
                 let copy_behavior = CopyBehavior {
                     preserve_owner: config.preserve_owner,
                     preserve_permissions: config.preserve_permissions,
                 };
-                let executor =
-                    apply::Executor::new(&root_a, root_b.as_ref(), &db, copy_behavior, &console);
+                let executor = apply::Executor::new(
+                    &root_a,
+                    prepared.root_b.as_ref(),
+                    &db,
+                    copy_behavior,
+                    &console,
+                );
                 match executor.execute(total_ops, &mut journal) {
                     Ok(stats) => {
                         journal.set_stats(stats);
@@ -590,6 +304,199 @@ pub fn run(cli: Cli) -> Result<()> {
     }
 
     Ok(())
+}
+
+struct PreparedSync {
+    root_b: Box<dyn roots::Root>,
+    diffs: Vec<diff::DiffResult>,
+    scan_a_count: usize,
+    scan_b_count: usize,
+    state_count: usize,
+    scan_a_state: Vec<state::Entry>,
+    hardlink_groups_a: Option<scan::HardlinkGroups>,
+    hardlink_groups_b: Option<scan::HardlinkGroups>,
+    scan_a_for_links: Option<Vec<ScanEntry>>,
+    scan_b_for_links: Option<Vec<ScanEntry>>,
+    preserve_mode: bool,
+}
+
+fn prepare_pipeline(
+    config: &config::Config,
+    root_a: &roots::LocalRoot,
+    root_b_spec: &RootSpec,
+    state_entries: Vec<state::Entry>,
+    console: &mut Console,
+) -> Result<PreparedSync> {
+    let root_b = root_b_spec.root()?;
+    let state_count = state_entries.len();
+    let state_hint = state_count as u64;
+    let state_map: HashMap<String, state::Entry> = state_entries
+        .iter()
+        .map(|e| (e.path.clone(), e.clone()))
+        .collect();
+
+    let default_include = vec!["**".to_string()];
+    let include_patterns = config.include.as_deref().unwrap_or(&default_include);
+    let default_ignore = vec![];
+    let ignore_patterns = config.ignore.as_deref().unwrap_or(&default_ignore);
+    if include_patterns.is_empty() {
+        tracing::warn!("Include patterns are empty; nothing will be scanned or synced.");
+    }
+    let filter = scan::Filter::new(include_patterns, ignore_patterns)?;
+    let hardlink_mode = config.hardlinks;
+
+    let label_a = format!("Root A ({})", root_a.path().display());
+    info!("Scanning {}", label_a);
+    let mut scan_a = run_scan_with_progress(
+        &label_a,
+        Some(state_hint),
+        |pb| scan::LocalScanner::new(root_a, &filter).scan_with_progress(Some(pb)),
+        console,
+    )?;
+
+    let mut scan_b = scan_root_b(root_b.as_ref(), &filter, hardlink_mode, state_hint, console)?;
+
+    if !matches!(hardlink_mode, config::HardlinkMode::Copy)
+        && (scan::has_missing_inode(&scan_a) || scan::has_missing_inode(&scan_b))
+    {
+        anyhow::bail!("Hardlink modes require inode/device IDs");
+    }
+
+    let preserve_mode = matches!(hardlink_mode, config::HardlinkMode::Preserve);
+    let hardlink_groups_a = if preserve_mode {
+        Some(scan::hardlink_groups(&scan_a))
+    } else {
+        None
+    };
+    let hardlink_groups_b = if preserve_mode {
+        Some(scan::hardlink_groups(&scan_b))
+    } else {
+        None
+    };
+
+    let hardlink_skip = if matches!(hardlink_mode, config::HardlinkMode::Skip) {
+        hardlink_skip_paths(&scan_a, &scan_b)
+    } else {
+        HashSet::new()
+    };
+    if !hardlink_skip.is_empty() {
+        tracing::warn!(
+            "Skipping {} hard-linked paths (hardlinks=skip).",
+            hardlink_skip.len()
+        );
+        filter_scan_entries(&mut scan_a, &hardlink_skip);
+        filter_scan_entries(&mut scan_b, &hardlink_skip);
+    }
+
+    let scan_a_count = scan_a.len();
+    let scan_b_count = scan_b.len();
+
+    hash_with_logging(
+        "Root A",
+        root_a,
+        &mut scan_a,
+        &state_map,
+        config.hash_mode,
+        console,
+    )?;
+    let scan_a_state: Vec<state::Entry> = scan_a.iter().map(ScanEntry::to_state).collect();
+    hash_with_logging(
+        "Root B",
+        root_b.as_ref(),
+        &mut scan_b,
+        &state_map,
+        config.hash_mode,
+        console,
+    )?;
+
+    let scan_a_for_links = if preserve_mode {
+        Some(scan_a.clone())
+    } else {
+        None
+    };
+    let scan_b_for_links = if preserve_mode {
+        Some(scan_b.clone())
+    } else {
+        None
+    };
+
+    let mut state_a = state_entries.clone();
+    let mut state_b = state_entries;
+    if !hardlink_skip.is_empty() {
+        filter_state_entries(&mut state_a, &hardlink_skip);
+        filter_state_entries(&mut state_b, &hardlink_skip);
+    }
+
+    let mut diffs = diff::DiffEngine::diff(scan_a, state_a, scan_b, state_b, &filter);
+
+    if let Some(force_side) = config.force_side()? {
+        match force_side {
+            config::ForceSide::RootA => {
+                console.out("Forcing State to match Root A (Mirror A -> B)")?
+            }
+            config::ForceSide::RootB => {
+                console.out("Forcing State to match Root B (Mirror B -> A)")?
+            }
+        }
+        apply_force_mirror(&mut diffs, force_side);
+    }
+
+    Ok(PreparedSync {
+        root_b,
+        diffs,
+        scan_a_count,
+        scan_b_count,
+        state_count,
+        scan_a_state,
+        hardlink_groups_a,
+        hardlink_groups_b,
+        scan_a_for_links,
+        scan_b_for_links,
+        preserve_mode,
+    })
+}
+
+fn scan_root_b(
+    root_b: &dyn roots::Root,
+    filter: &scan::Filter,
+    hardlink_mode: config::HardlinkMode,
+    state_hint: u64,
+    console: &Console,
+) -> Result<Vec<ScanEntry>> {
+    match root_b.kind() {
+        roots::RootType::Ssh => {
+            let ssh_root = root_b
+                .as_any()
+                .downcast_ref::<roots::SshRoot>()
+                .context("Root B is not SSH")?;
+            let caps = ssh_root.probe_caps()?;
+            let label_b = format!("Root B ({})", ssh_root.path().display());
+            info!("Scanning {}", label_b);
+            if !matches!(hardlink_mode, config::HardlinkMode::Copy) && !caps.has_find_inode {
+                anyhow::bail!("Hardlink modes require remote `find` with %D/%i support");
+            }
+            run_scan_with_progress(
+                &label_b,
+                Some(state_hint),
+                |pb| scan::RemoteScanner::new(ssh_root, filter, caps).scan_with_progress(Some(pb)),
+                console,
+            )
+        }
+        roots::RootType::Local => {
+            let local_b = root_b
+                .as_any()
+                .downcast_ref::<roots::LocalRoot>()
+                .context("Unsupported root type for B")?;
+            let label_b = format!("Root B ({})", local_b.path().display());
+            info!("Scanning {}", label_b);
+            run_scan_with_progress(
+                &label_b,
+                Some(state_hint),
+                |pb| scan::LocalScanner::new(local_b, filter).scan_with_progress(Some(pb)),
+                console,
+            )
+        }
+    }
 }
 
 fn install_signal_handler() {
