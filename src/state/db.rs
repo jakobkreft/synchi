@@ -107,7 +107,7 @@ impl StateDb {
         Ok(count)
     }
 
-    #[cfg_attr(not(test), allow(dead_code))]
+    #[cfg(test)]
     pub fn open_memory() -> Result<Self> {
         let conn = Connection::open_in_memory()?;
         let db = Self { conn };
@@ -181,7 +181,7 @@ impl StateDb {
         Ok(())
     }
 
-    #[cfg_attr(not(test), allow(dead_code))]
+    #[cfg(test)]
     pub fn get_meta(&self, key: &str) -> Result<Option<String>> {
         let mut stmt = self.conn.prepare("SELECT value FROM meta WHERE key = ?1")?;
         stmt.query_row(params![key], |row| row.get(0))
@@ -189,7 +189,7 @@ impl StateDb {
             .map_err(Into::into)
     }
 
-    #[cfg_attr(not(test), allow(dead_code))]
+    #[cfg(test)]
     pub fn set_meta(&self, key: &str, value: &str) -> Result<()> {
         self.conn.execute(
             "INSERT OR REPLACE INTO meta (key, value) VALUES (?1, ?2)",
@@ -198,7 +198,6 @@ impl StateDb {
         Ok(())
     }
 
-    #[cfg_attr(not(test), allow(dead_code))]
     pub fn get_entry(&self, path: &str) -> Result<Option<Entry>> {
         let mut stmt = self.conn.prepare(
             "SELECT path, kind, size, mtime, mode, hash, link_target, deleted FROM entries WHERE path = ?1"
@@ -229,7 +228,6 @@ impl StateDb {
         Ok(entry)
     }
 
-    #[cfg_attr(not(test), allow(dead_code))]
     pub fn upsert_entry(&self, entry: &Entry) -> Result<()> {
         let kind_int = match entry.kind {
             EntryKind::File => 0,

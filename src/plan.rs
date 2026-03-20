@@ -36,7 +36,6 @@ pub struct Plan {
     pub delete_b: Vec<DeleteOp>,
     pub hardlink_a_to_b: Vec<LinkOp>,
     pub hardlink_b_to_a: Vec<LinkOp>,
-    pub conflicts: Vec<DiffResult>,
 }
 
 impl Plan {
@@ -65,8 +64,7 @@ impl PlanBuilder {
 
         for diff in diffs {
             match diff.action {
-                SyncAction::NoOp => {}
-                SyncAction::Conflict(_) => plan.conflicts.push(diff),
+                SyncAction::NoOp | SyncAction::Conflict(_) => {}
                 SyncAction::CopyAtoB => {
                     if let Some(entry) = diff.change_a.entry_now.clone() {
                         plan.copy_a_to_b.push(entry.to_state());

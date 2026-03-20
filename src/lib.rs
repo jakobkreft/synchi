@@ -1099,7 +1099,7 @@ fn hash_with_logging(
     Ok(())
 }
 
-#[cfg_attr(not(test), allow(dead_code))]
+#[cfg(test)]
 fn prepare_hashes(
     root: &dyn roots::Root,
     entries: &mut [ScanEntry],

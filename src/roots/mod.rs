@@ -203,12 +203,6 @@ pub trait Root: Send + Sync {
     /// Return the absolute path of the root
     fn path(&self) -> &Path;
 
-    /// Normalize a path relative to the root (ensure it starts with ./ or is relative)
-    /// and check bounds.
-    fn normalize_path(&self, path: &Path) -> Result<PathBuf> {
-        Ok(path.to_path_buf())
-    }
-
     /// Get metadata for path (lstat - does not follow symlinks)
     fn lstat(&self, path: &Path) -> Result<RootMetadata>;
 

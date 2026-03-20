@@ -392,7 +392,7 @@ impl Root for SshRoot {
 
         let mut result = Vec::with_capacity(paths.len());
         for path in paths {
-            let p = self.normalize_path(path)?.to_string_lossy().to_string();
+            let p = path.to_string_lossy().to_string();
             let key = p.strip_prefix("./").unwrap_or(&p);
             if let Some(h) = hash_map.get(key) {
                 result.push(h.clone());
