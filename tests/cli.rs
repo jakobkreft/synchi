@@ -12,6 +12,15 @@ fn help_includes_name() {
 }
 
 #[test]
+fn version_flag_outputs_version() {
+    let mut cmd = cargo_bin_cmd!("synchi");
+    cmd.arg("--version")
+        .assert()
+        .success()
+        .stdout(contains("synchi"));
+}
+
+#[test]
 fn missing_roots_exit_with_error() {
     let dir = tempfile::tempdir().unwrap();
     let config_path = dir.path().join("config.toml");
