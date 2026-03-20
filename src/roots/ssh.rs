@@ -79,29 +79,6 @@ impl SshRoot {
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn parse_sha256sum_zero_preserves_whitespace() {
-        let hash1 = "a".repeat(64);
-        let hash2 = "b".repeat(64);
-        let out = format!("{hash1}  ./ leading.txt\0{hash2}  trail.txt \0");
-        let map = parse_sha256sum_zero(out.as_bytes()).unwrap();
-        assert_eq!(map.get(" leading.txt"), Some(&hash1));
-        assert_eq!(map.get("trail.txt "), Some(&hash2));
-    }
-
-    #[test]
-    fn parse_sha256sum_text_preserves_whitespace() {
-        let hash = "c".repeat(64);
-        let out = format!("{hash}  ./ spaced .txt \n");
-        let map = parse_sha256sum_text(out.as_bytes()).unwrap();
-        assert_eq!(map.get(" spaced .txt "), Some(&hash));
-    }
-}
-
 struct SshRead {
     child: Child,
     stdout: ChildStdout,
@@ -208,20 +185,12 @@ impl Root for SshRoot {
     fn try_lock(&self, path: &Path, info: &str) -> Result<()> {
         let abs_path = self.root_path.join(path);
         let abs_path_q = shell_quote_path(&abs_path);
-        // Remote locking: mkdir .synchi/lockdir
-        // mkdir is atomic on POSIX.
-        // We also want to write the info inside.
-        // Step 1: mkdir lock_path
+        // Remote locking: mkdir is atomic on POSIX.
         self.exec_checked(&format!("mkdir -- {abs_path_q}"))?;
-        // Step 2: write info to lock_path/owner
         let info_path = abs_path.join("owner");
         let info_str = info.to_string();
         let info_q = shell_quote(&info_str);
         let info_path_q = shell_quote_path(&info_path);
-        // Use a temp implementation of write call? Or just echo.
-        // Warning: echo info > path is risky if info has special chars, but PID/Host is usually safe.
-        // We'll trust info is simple for now, or sanitize it.
-        // Assuming strictly alphanumeric + logic.
         self.exec_checked(&format!("printf '%s' {info_q} > {info_path_q}"))?;
         Ok(())
     }
@@ -267,8 +236,6 @@ impl Root for SshRoot {
             self.exec_checked(&format!("mkdir -p -- {parent_q}"))?;
         }
 
-        // Ensure parent exists? optional but good.
-        // Write to temp: path.synchi-tmp
         let tmp_path = format!("{}.synchi-tmp", abs_path.display());
         let tmp_path_q = shell_quote(&tmp_path);
 
@@ -468,4 +435,27 @@ fn parse_sha256sum_text(out: &[u8]) -> Result<std::collections::HashMap<String, 
 
 fn find_double_space(bytes: &[u8]) -> Option<usize> {
     bytes.windows(2).position(|pair| pair == b"  ")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parse_sha256sum_zero_preserves_whitespace() {
+        let hash1 = "a".repeat(64);
+        let hash2 = "b".repeat(64);
+        let out = format!("{hash1}  ./ leading.txt\0{hash2}  trail.txt \0");
+        let map = parse_sha256sum_zero(out.as_bytes()).unwrap();
+        assert_eq!(map.get(" leading.txt"), Some(&hash1));
+        assert_eq!(map.get("trail.txt "), Some(&hash2));
+    }
+
+    #[test]
+    fn parse_sha256sum_text_preserves_whitespace() {
+        let hash = "c".repeat(64);
+        let out = format!("{hash}  ./ spaced .txt \n");
+        let map = parse_sha256sum_text(out.as_bytes()).unwrap();
+        assert_eq!(map.get(" spaced .txt "), Some(&hash));
+    }
 }

@@ -48,7 +48,7 @@ root_a = "./root_a"
 root_b = "ssh://user@host/srv/data"
 include = ["**"]
 ignore = ["**/.venv/**"]
-# Read configuration instuctions for other options.
+# Read configuration instructions for other options.
 
 # Remote roots must use ssh://user@host/path.
 # scp-style user@host:/path is not supported.

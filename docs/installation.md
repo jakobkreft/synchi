@@ -19,7 +19,7 @@ Extract the archive and make the binary executable, then place it somewhere on y
 ```bash
 chmod +x synchi
 mv synchi /usr/local/bin/
-
+```
 
 Verify the installation:
 

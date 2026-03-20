@@ -193,7 +193,7 @@ pub struct RootMetadata {
 pub enum EntryKind {
     File,
     Dir,
-    Symlink, // and Other?
+    Symlink,
 }
 
 pub trait Root: Send + Sync {
@@ -226,27 +226,19 @@ pub trait Root: Send + Sync {
     /// Create a symlink at path pointing to target
     fn create_symlink(&self, target: &str, path: &Path) -> Result<()>;
 
-    /// Create directory (mkdir -p behavior preferred or one level?)
-    /// Blueprint says `mkdirs`.
+    /// Create directories recursively (mkdir -p).
     fn mkdirs(&self, path: &Path) -> Result<()>;
 
     /// Remove file
     fn remove_file(&self, path: &Path) -> Result<()>;
 
-    /// Remove directory (must be empty? or recursive? standard fs::remove_dir usually empty)
+    /// Remove an empty directory.
     fn remove_dir(&self, path: &Path) -> Result<()>;
 
     /// Execute a command (SSH only)
     fn exec(&self, cmd: &str) -> Result<(Vec<u8>, Vec<u8>, i32)>;
 
-    /// Compute hashes for a list of files (batched)
-    /// Returns a map or list of hashes corresponding to paths.
-    /// Order should match validation or use return type `Vec<(PathBuf, String)>`?
-    /// Let's return `Vec<String>` in same order, or `Result<Vec<String>>`.
-    /// If one fails, we usually fail the batch? Or return Option?
-    /// Simplest: `Vec<Option<String>>`?
-    /// For sync, if hashing fails (file gone), we might want to know.
-    /// Let's return `Result<Vec<String>>` assuming all exist.
+    /// Compute SHA-256 hashes for a batch of files. Returns hex strings in the same order as paths.
     fn hash_files(&self, _paths: &[PathBuf]) -> Result<Vec<String>> {
         anyhow::bail!("Hash files not implemented for this root");
     }

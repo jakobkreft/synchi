@@ -27,7 +27,7 @@ force = "none"
 hardlinks = "skip"
 preserve_owner = false
 preserve_permissions = true
-````
+```
 
 Most users only need to adjust `root_a`, `root_b`, and possibly `include` / `ignore`.
 

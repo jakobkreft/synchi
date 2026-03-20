@@ -22,18 +22,6 @@ fn kind_mode_bits(kind: EntryKind) -> u32 {
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn combines_permission_and_type_bits() {
-        assert_eq!(kind_mode_bits(EntryKind::File) | 0o644, 0o100644);
-        assert_eq!(kind_mode_bits(EntryKind::Dir) | 0o755, 0o040755);
-        assert_eq!(kind_mode_bits(EntryKind::Symlink) | 0o777, 0o120777);
-    }
-}
-
 impl<'a> RemoteScanner<'a> {
     pub fn new(root: &'a SshRoot, filter: &'a Filter, caps: RemoteCaps) -> Self {
         Self { root, filter, caps }
@@ -193,5 +181,17 @@ impl<'a> RemoteScanner<'a> {
         }
 
         Ok(entries)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn combines_permission_and_type_bits() {
+        assert_eq!(kind_mode_bits(EntryKind::File) | 0o644, 0o100644);
+        assert_eq!(kind_mode_bits(EntryKind::Dir) | 0o755, 0o040755);
+        assert_eq!(kind_mode_bits(EntryKind::Symlink) | 0o777, 0o120777);
     }
 }

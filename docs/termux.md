@@ -16,7 +16,7 @@ To allow Synchi (or SSH access from another machine) to see your Android files, 
 
 ```bash
 termux-setup-storage
-````
+```
 
 This exposes Android’s shared storage under:
 

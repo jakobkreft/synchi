@@ -564,96 +564,6 @@ impl StateDb {
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::plan::LinkOp;
-
-    #[test]
-    fn test_db_operations() -> Result<()> {
-        let db = StateDb::open_memory()?;
-
-        // Meta
-        db.set_meta("foo", "bar")?;
-        assert_eq!(db.get_meta("foo")?, Some("bar".to_string()));
-        assert_eq!(db.get_meta("baz")?, None);
-
-        // Entry
-        let entry = Entry {
-            path: "a/b.txt".to_string(),
-            kind: EntryKind::File,
-            size: 100,
-            mtime: 123456789,
-            mode: 0o644,
-            hash: Some(vec![0, 1, 2, 3]),
-            link_target: None,
-            deleted: false,
-        };
-
-        db.upsert_entry(&entry)?;
-
-        let fetched = db.get_entry("a/b.txt")?.unwrap();
-        assert_eq!(fetched.path, "a/b.txt");
-        assert_eq!(fetched.kind, EntryKind::File);
-        assert_eq!(fetched.hash, Some(vec![0, 1, 2, 3]));
-
-        // Update to deleted
-        let mut deleted_entry = entry.clone();
-        deleted_entry.deleted = true;
-        db.upsert_entry(&deleted_entry)?;
-
-        let fetched_del = db.get_entry("a/b.txt")?.unwrap();
-        assert!(fetched_del.deleted);
-
-        // Refresh metadata when hash matches
-        let mut refreshed = entry.clone();
-        refreshed.mtime += 10;
-        refreshed.mode = 0o600;
-        let mut refresh_entry = refreshed.clone();
-        refresh_entry.hash = Some(vec![0, 1, 2, 3]);
-        db.refresh_metadata(&[refresh_entry])?;
-        let updated = db.get_entry("a/b.txt")?.unwrap();
-        assert_eq!(updated.mtime, refreshed.mtime);
-        assert_eq!(updated.mode, refreshed.mode);
-
-        Ok(())
-    }
-
-    #[test]
-    fn link_ops_clone_target_entry() -> Result<()> {
-        let db = StateDb::open_memory()?;
-        let entry = Entry {
-            path: "target.txt".to_string(),
-            kind: EntryKind::File,
-            size: 42,
-            mtime: 123,
-            mode: 0o644,
-            hash: None,
-            link_target: None,
-            deleted: false,
-        };
-        db.upsert_entry(&entry)?;
-
-        let mut plan = Plan::default();
-        plan.hardlink_a_to_b.push(LinkOp {
-            path: "linked.txt".to_string(),
-            target: "target.txt".to_string(),
-        });
-        db.queue_plan(&plan)?;
-
-        let pending = db.fetch_pending_links(CopyDirection::AtoB, 10)?;
-        assert_eq!(pending.len(), 1);
-        db.complete_pending_links(&pending)?;
-
-        let linked = db.get_entry("linked.txt")?.expect("linked entry");
-        assert_eq!(linked.kind, EntryKind::File);
-        assert_eq!(linked.size, 42);
-        assert_eq!(linked.mtime, 123);
-        assert_eq!(linked.mode, 0o644);
-        Ok(())
-    }
-}
-
 fn kind_to_int(kind: EntryKind) -> i32 {
     match kind {
         EntryKind::File => 0,
@@ -755,4 +665,94 @@ fn insert_entries_from_pending(conn: &Connection, copies: &[PendingCopy]) -> Res
         ])?;
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::plan::LinkOp;
+
+    #[test]
+    fn test_db_operations() -> Result<()> {
+        let db = StateDb::open_memory()?;
+
+        // Meta
+        db.set_meta("foo", "bar")?;
+        assert_eq!(db.get_meta("foo")?, Some("bar".to_string()));
+        assert_eq!(db.get_meta("baz")?, None);
+
+        // Entry
+        let entry = Entry {
+            path: "a/b.txt".to_string(),
+            kind: EntryKind::File,
+            size: 100,
+            mtime: 123456789,
+            mode: 0o644,
+            hash: Some(vec![0, 1, 2, 3]),
+            link_target: None,
+            deleted: false,
+        };
+
+        db.upsert_entry(&entry)?;
+
+        let fetched = db.get_entry("a/b.txt")?.unwrap();
+        assert_eq!(fetched.path, "a/b.txt");
+        assert_eq!(fetched.kind, EntryKind::File);
+        assert_eq!(fetched.hash, Some(vec![0, 1, 2, 3]));
+
+        // Update to deleted
+        let mut deleted_entry = entry.clone();
+        deleted_entry.deleted = true;
+        db.upsert_entry(&deleted_entry)?;
+
+        let fetched_del = db.get_entry("a/b.txt")?.unwrap();
+        assert!(fetched_del.deleted);
+
+        // Refresh metadata when hash matches
+        let mut refreshed = entry.clone();
+        refreshed.mtime += 10;
+        refreshed.mode = 0o600;
+        let mut refresh_entry = refreshed.clone();
+        refresh_entry.hash = Some(vec![0, 1, 2, 3]);
+        db.refresh_metadata(&[refresh_entry])?;
+        let updated = db.get_entry("a/b.txt")?.unwrap();
+        assert_eq!(updated.mtime, refreshed.mtime);
+        assert_eq!(updated.mode, refreshed.mode);
+
+        Ok(())
+    }
+
+    #[test]
+    fn link_ops_clone_target_entry() -> Result<()> {
+        let db = StateDb::open_memory()?;
+        let entry = Entry {
+            path: "target.txt".to_string(),
+            kind: EntryKind::File,
+            size: 42,
+            mtime: 123,
+            mode: 0o644,
+            hash: None,
+            link_target: None,
+            deleted: false,
+        };
+        db.upsert_entry(&entry)?;
+
+        let mut plan = Plan::default();
+        plan.hardlink_a_to_b.push(LinkOp {
+            path: "linked.txt".to_string(),
+            target: "target.txt".to_string(),
+        });
+        db.queue_plan(&plan)?;
+
+        let pending = db.fetch_pending_links(CopyDirection::AtoB, 10)?;
+        assert_eq!(pending.len(), 1);
+        db.complete_pending_links(&pending)?;
+
+        let linked = db.get_entry("linked.txt")?.expect("linked entry");
+        assert_eq!(linked.kind, EntryKind::File);
+        assert_eq!(linked.size, 42);
+        assert_eq!(linked.mtime, 123);
+        assert_eq!(linked.mode, 0o644);
+        Ok(())
+    }
 }

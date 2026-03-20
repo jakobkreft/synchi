@@ -34,7 +34,6 @@ pub enum SyncAction {
     DeleteB,
     NoOp,
     Conflict(ConflictReason),
-    // Complex merges or renames could be added here
 }
 
 #[derive(Debug, Clone)]
@@ -82,11 +81,6 @@ impl DiffEngine {
         sorted_paths.sort();
 
         for path in sorted_paths {
-            // Check ignore first?
-            // If path is ignored, we should ignore it unless it's in DB and we need to untrack?
-            // If it's in DB but ignored now, Scan is None. State is Some.
-            // We treat it as "Ignored".
-
             let path_ref = std::path::Path::new(&path);
             let included = filter.is_included(path_ref);
             let ignored = filter.is_ignored(path_ref) || !included;
