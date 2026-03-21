@@ -22,7 +22,7 @@ Synchi keeps files in two places in sync. Each time it runs, it detects changes 
 - Honors include/ignore rules (include defines the sync scope; out-of-scope paths are ignored, not deleted).
 - Hashing for more accurate change detection.
 
-Full documentation is available [here](docs/index.md).
+[Full documentation is available here](https://jakobkreft.github.io/synchi/).
 
 ## How it works
 
