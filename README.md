@@ -56,11 +56,15 @@ These tools are usually already installed on most Linux systems.
 
 ## Installation
 
+Install from [crates.io](https://crates.io/crates/synchi):
+
 ```bash
-git clone https://github.com/jakobkreft/synchi.git
-cd synchi
-cargo install --path .
+cargo install synchi
 ```
+
+Or download a precompiled binary from [GitHub Releases](https://github.com/jakobkreft/synchi/releases/) (Linux x86_64/ARM64, macOS ARM64/x86_64).
+
+See the [Installation Guide](docs/installation.md) for all options.
 
 ## Usage
 

@@ -59,8 +59,8 @@ A typical sync run: Synchi scans both roots, computes what changed, and executes
 ## Quick start
 
 ```bash
-# Install Synchi (see installation docs for all options)
-synchi --help
+# Install from crates.io
+cargo install synchi
 
 # Create your own config
 # By default Synchi reads: ~/.config/synchi/config.toml
