@@ -68,7 +68,7 @@ cargo install synchi
 
 Or download a precompiled binary from [GitHub Releases](https://github.com/jakobkreft/synchi/releases/) (Linux x86_64/ARM64, macOS ARM64/x86_64).
 
-See the [Installation Guide](docs/installation.md) for all options.
+See the [Installation Guide](https://jakobkreft.github.io/synchi/installation.html) for all options.
 
 ## Usage
 
