@@ -2,7 +2,11 @@
   <img src="docs/assets/img/logo.svg" alt="Synchi logo" width="150">
 </p>
 
-# What is Synchi? 
+[![CI](https://github.com/jakobkreft/synchi/actions/workflows/ci.yml/badge.svg)](https://github.com/jakobkreft/synchi/actions/workflows/ci.yml)
+[![Crates.io](https://img.shields.io/crates/v/synchi.svg)](https://crates.io/crates/synchi)
+[![License: GPL-3.0](https://img.shields.io/badge/License-GPL%203.0-blue.svg)](LICENSE)
+
+# What is Synchi?
 Synchi keeps files in two places in sync. Each time it runs, it detects changes since the last run and leaves conflicts for the user to resolve. Unlike rsync or Unison, Synchi does not require any agent on remote hosts.
 
 
