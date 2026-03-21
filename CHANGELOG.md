@@ -21,3 +21,9 @@ All notable changes to this project will be documented here.
 - Cleaned up comments across the codebase.
 - Fixed doc formatting: broken code fences in installation.md, configuration.md, termux.md; typo in index.md.
 - Added workflow diagram and terminal demo to docs and README.
+
+## 0.1.3
+
+- Published to [crates.io](https://crates.io/crates/synchi): `cargo install synchi` is now the recommended install method.
+- Added release builds for Linux ARM64 (Raspberry Pi, ARM servers) and macOS x86_64 (Intel Macs).
+- Updated installation docs to reflect crates.io and all four platform binaries.
