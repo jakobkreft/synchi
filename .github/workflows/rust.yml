@@ -18,48 +18,54 @@ jobs:
         include:
           - os: ubuntu-latest
             artifact: synchi-linux-x86_64
+            target: x86_64-unknown-linux-gnu
           - os: ubuntu-24.04-arm
             artifact: synchi-linux-aarch64
+            target: aarch64-unknown-linux-gnu
           - os: macos-latest
             artifact: synchi-macos-aarch64
-          - os: macos-13
+            target: aarch64-apple-darwin
+          - os: macos-latest
             artifact: synchi-macos-x86_64
+            target: x86_64-apple-darwin
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - name: Install stable toolchain
         uses: dtolnay/rust-toolchain@stable
         with:
           components: rustfmt, clippy
+          targets: ${{ matrix.target }}
 
       - name: fmt
-        if: matrix.os == 'ubuntu-latest'
+        if: matrix.os == 'ubuntu-latest' && matrix.target == 'x86_64-unknown-linux-gnu'
         run: cargo fmt --check
 
       - name: clippy
-        if: matrix.os == 'ubuntu-latest'
+        if: matrix.os == 'ubuntu-latest' && matrix.target == 'x86_64-unknown-linux-gnu'
         run: cargo clippy -- -D warnings
 
       - name: Build release binary
         run: |
-          if [ "${{ matrix.os }}" = "ubuntu-latest" ]; then
-            cargo build --release --locked
+          if [ "${{ matrix.target }}" = "x86_64-unknown-linux-gnu" ]; then
+            cargo build --release --locked --target ${{ matrix.target }}
           else
-            cargo build --release
+            cargo build --release --target ${{ matrix.target }}
           fi
 
       - name: Run tests
+        if: matrix.os != 'macos-latest' || matrix.target == 'aarch64-apple-darwin'
         run: |
-          if [ "${{ matrix.os }}" = "ubuntu-latest" ]; then
-            cargo test --release --locked
+          if [ "${{ matrix.target }}" = "x86_64-unknown-linux-gnu" ]; then
+            cargo test --release --locked --target ${{ matrix.target }}
           else
-            cargo test --release
+            cargo test --release --target ${{ matrix.target }}
           fi
 
       - name: Prepare release artifact
         run: |
-          cp target/release/synchi ${{ matrix.artifact }}
+          cp target/${{ matrix.target }}/release/synchi ${{ matrix.artifact }}
 
       - name: Create release and upload binary
         uses: softprops/action-gh-release@v2
