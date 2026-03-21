@@ -20,6 +20,30 @@ Synchi keeps files in two places in sync. Each time it runs, it detects changes 
 
 Full documentation is available [here](docs/index.md).
 
+## How it works
+
+<p align="center">
+  <img src="docs/assets/img/workflow.svg" alt="Synchi workflow: scan, diff against state, resolve, execute" width="350">
+</p>
+
+Synchi synchronizes files in five steps:
+
+1. Scan both roots, applying include/ignore rules and the selected hardlink mode.
+2. Detect changes since the last run, using optional hashing for accuracy.
+3. Compare the results to classify files as new, modified, or deleted.
+4. Plan the operations, automatically handling or letting you resolve conflicts.
+5. Execute the operations safely, batching transfers to avoid copying unchanged data.
+
+Only genuinely new or changed files are transferred, making syncing efficient and reliable. Because Synchi keeps state between runs, repeated executions are fast and stable.
+
+### Example output
+
+A typical sync run: Synchi scans both roots, computes what changed, and executes only the necessary operations.
+
+<p align="left">
+  <img src="docs/assets/img/demo.svg" alt="Terminal output of a synchi sync run" width="740">
+</p>
+
 ## Requirements
 
 Synchi needs a few standard tools on each root (local or remote) to work properly:
@@ -94,18 +118,6 @@ Destructive actions:
 - `force = "root_a"` or `"root_b"` will mirror one side, which can remove data on the other side.
 
 When in doubt, run `synchi status` or `synchi sync --dry-run` first and keep a separate backup.
-
-### Synchi Workflow
-
-Synchi synchronizes files in five steps:
-
-1. Scan both roots, applying include/ignore rules and the selected hardlink mode.
-2. Detect changes since the last run, using optional hashing for accuracy.
-3. Compare the results to classify files as new, modified, or deleted.
-4. Plan the operations, automatically handling or letting you resolve conflicts.
-5. Execute the operations safely, batching transfers to avoid copying unchanged data.
-
-Only genuinely new or changed files are transferred, making syncing efficient and reliable.
 
 ### Configuration reference
 

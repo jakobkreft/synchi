@@ -26,6 +26,14 @@ It does not watch files, run in the background, or try to hide what it’s doing
 
 ## How it works
 
+<p align="center">
+  <img
+    src="assets/img/workflow.svg"
+    alt="Synchi workflow: scan, diff against state, resolve, execute"
+    width="350"
+  />
+</p>
+
 At a high level, Synchi does the following:
 
 1. Scans both roots while applying include and ignore rules (include defines the sync scope)  
@@ -35,6 +43,18 @@ At a high level, Synchi does the following:
 5. Executes them safely, transferring only what actually changed  
 
 Because Synchi keeps state between runs, repeated executions are fast and stable.
+
+## What it looks like
+
+A typical sync run: Synchi scans both roots, computes what changed, and executes only the necessary operations.
+
+<p align="left">
+  <img
+    src="assets/img/demo.svg"
+    alt="Terminal output of a synchi sync run"
+    width="740"
+  />
+</p>
 
 ## Quick start
 
