@@ -27,3 +27,10 @@ All notable changes to this project will be documented here.
 - Published to [crates.io](https://crates.io/crates/synchi): `cargo install synchi` is now the recommended install method.
 - Added release builds for Linux ARM64 (Raspberry Pi, ARM servers) and macOS x86_64 (Intel Macs).
 - Updated installation docs to reflect crates.io and all four platform binaries.
+
+## 0.1.4
+
+- Fixed macOS x86_64 release build (cross-compile from ARM64 runner, replacing deprecated macos-13).
+- Updated GitHub Actions to actions/checkout@v6 (Node.js 24, fixes deprecation warnings).
+- Added CI and crates.io badges to README.
+- Added GoatCounter analytics to docs site.
