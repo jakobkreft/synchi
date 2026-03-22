@@ -134,6 +134,8 @@ Most options can be overridden via CLI flags, including:
 Both `synchi status` and `synchi sync` use the same logic.
 Running `status` first shows exactly what `sync` would do.
 
-## Android / Termux
+## Further reading
 
-Notes specific to Android live in [Android (Termux)](./termux.md).
+* [Installation Guide](./installation.md)
+* [Android (Termux)](./termux.md)
+* [Troubleshooting](./troubleshooting.md)

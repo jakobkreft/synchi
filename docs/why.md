@@ -105,3 +105,9 @@ Most file sync tools are optimized for automation.
 Synchi is optimized for clarity.
 
 That trade-off won’t appeal to everyone, but it’s the reason the tool exists.
+
+## Further reading
+
+* [Installation Guide](./installation.md)
+* [Configuration Reference](./configuration.md)
+* [Android (Termux)](./termux.md)

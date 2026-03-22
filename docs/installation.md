@@ -51,6 +51,17 @@ The compiled binary will be available at `target/release/synchi`. You can copy i
 cargo install --path .
 ```
 
+## Android (Termux)
+
+Synchi can be built from source inside [Termux](https://termux.dev/):
+
+```bash
+pkg install rust git
+cargo install synchi
+```
+
+See [Android (Termux)](./termux.md) for the full setup guide including SSH configuration.
+
 ## System Requirements
 
 Synchi relies on a few standard Unix tools on both the local machine and any remote hosts:

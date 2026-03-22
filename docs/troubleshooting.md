@@ -108,9 +108,15 @@ If you want to completely reset the tracked scope:
 
 ## Still stuck?
 
-If none of the above helps, open a GitHub issue and include:
+If none of the above helps, open a [GitHub issue](https://github.com/jakobkreft/synchi/issues) and include:
 
 1. Your config file (with personal info redacted)
 2. Command output with `-v`
 3. Steps to recreate
-3. Synchi version and platform
+4. Synchi version and platform
+
+## Further reading
+
+* [Configuration Reference](./configuration.md)
+* [Android (Termux)](./termux.md)
+* [Why Synchi?](./why.md)

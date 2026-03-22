@@ -101,6 +101,7 @@ Most Linux systems already meet these requirements.
 
 * [Installation Guide](./installation.md)
 * [Configuration Reference](./configuration.md)
+* [Android (Termux)](./termux.md)
 * [Troubleshooting & FAQ](./troubleshooting.md)
 * [Why Synchi?](./why.md)
 * [GitHub Repository](https://github.com/jakobkreft/synchi)
