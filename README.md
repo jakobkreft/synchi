@@ -48,6 +48,12 @@ A typical sync run: Synchi scans both roots, computes what changed, and executes
   <img src="docs/assets/img/demo.svg" alt="Terminal output of a synchi sync run" width="740">
 </p>
 
+When both sides modify the same file, Synchi opens an interactive view to resolve each conflict.
+
+<p align="left">
+  <img src="docs/assets/img/conflicts.svg" alt="Conflict resolution interface showing per-file choices" width="740">
+</p>
+
 ## Requirements
 
 Synchi needs a few standard tools on each root (local or remote) to work properly:

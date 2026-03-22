@@ -56,6 +56,16 @@ A typical sync run: Synchi scans both roots, computes what changed, and executes
   />
 </p>
 
+When both sides modify the same file, Synchi opens an interactive view to resolve each conflict.
+
+<p align="left">
+  <img
+    src="assets/img/conflicts.svg"
+    alt="Conflict resolution interface showing per-file choices"
+    width="740"
+  />
+</p>
+
 ## Quick start
 
 ```bash

@@ -86,7 +86,7 @@ impl Ui {
             terminal.draw(|f| {
                 let chunks = Layout::default()
                     .direction(LayoutDir::Vertical)
-                    .constraints([Constraint::Percentage(80), Constraint::Percentage(20)].as_ref())
+                    .constraints([Constraint::Fill(1), Constraint::Length(10)])
                     .split(f.area());
 
                 let items: Vec<ListItem> = app.conflicts.iter().enumerate().map(|(i, c)| {
