@@ -100,6 +100,11 @@ If you want to completely reset the tracked scope:
 
 * Delete `.synchi/<state_db_name>.db` (default `state.db`) and run `synchi init` to rebuild state for the new scope.
 
+
+## Why can you only sync between two "roots"
+
+N-way sync (root_a syncing to root_b and root_c etc) introduces complicated merge conflicts and creates a distributed systems problem. [Discussion](https://github.com/jakobkreft/synchi/discussions/3)
+
 ## Diagnostic tips
 
 * Use `-v` for more detailed output.
