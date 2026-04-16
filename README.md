@@ -83,17 +83,17 @@ See the [Installation Guide](https://jakobkreft.github.io/synchi/installation.ht
 You can initialize the local database explicitly (optional, `sync` will auto-init):
 
 ```bash
-synchi init --root-a ./folderA --root-b ./folderB
+synchi --root-a ./folderA --root-b ./folderB init
 ```
 
 ### Syncing
 
 ```bash
 # Local <-> local
-synchi sync --root-a ./folderA --root-b ./folderB
+synchi --root-a ./folderA --root-b ./folderB sync
 
 # Local <-> remote (ssh://, allows custom port 8022, etc.)
-synchi sync --root-a ./folderA --root-b ssh://user@host:8022/remote/path
+synchi --root-a ./folderA --root-b ssh://user@host:8022/remote/path sync
 
 # Note: Only ssh:// is supported for remote roots.
 # scp-style user@host:/path is not supported.
